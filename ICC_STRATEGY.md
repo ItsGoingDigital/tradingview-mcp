@@ -52,17 +52,65 @@ The indication is the most recent **higher high** (bullish) or **lower low** (be
 - **Indication price**: The previous pivot high/low that was **broken** to create the new extreme
 - **Take profit**: The resulting new high/low — the extreme itself
 
+**V-shaped rallies / waterfalls (no internal pivot structure):**
+
+Sometimes the move from the low to the high (or high to low) is a straight shot with no meaningful pullback — a V-shaped recovery or waterfall selloff. In this case, there are no pivot highs or lows *within* the current trend to use as indication.
+
+When this happens:
+1. Look at the **swing highs/lows from the prior trend** — the lower highs (downtrend) or higher lows (uptrend) that were made before the reversal
+2. The **most recent swing high before the low** (bullish) or **most recent swing low before the high** (bearish) is the indication — it's the level price had to break to prove the new trend
+3. In this scenario, indication and ChoCh are the same level
+4. Use swing highs/lows here (not just pivots) because the compressed structure may not produce clean multi-bar pivots
+
 ### 3. Determine Current Phase
 
 Work through these **in order** — stop at the first match:
 
 **A. Is price above/below the indication level?**
 - If price has already reclaimed the indication level AND the 15m confirms structure in the indication direction → **Continuation**. Go to Step 4.
+- If price has touched/wicked through indication but the 15m has NOT confirmed (no HH/HL on the reclaim side) → still **Correction**, but flag as **Reclaim Pending**. Price is testing the level without committing. Do NOT enter. Watch for the 15m structure shift to confirm.
 - If not, continue to B.
 
 **B. Has price pulled back from the new extreme?**
 - If price is retracing against the indication direction AND the 15m is trending counter to the 4H bias → **Correction**. Price is forming the next HL (bullish) or LH (bearish). Produce the Correction Levels Addendum (see below). Do NOT enter.
 - If no pullback has started → **Still in Indication**. Watch, don't chase.
+
+**Note on Reclaim Pending:** This is a flag, not a phase. The phase is still Correction. The flag exists to distinguish a clean correction (price clearly below indication) from one where price is oscillating around the indication level without committing. Reclaim Pending means we're closer to continuation but it isn't confirmed yet.
+
+### 3a. Consolidation Detection
+
+Before acting on any phase, check whether price is currently **consolidating** (range-bound). Consolidation can occur during any phase — within Continuation (the trend pauses), within Correction (the pullback bottoms out in chop), or around Indication (price oscillates without commitment). It is a **flag**, not a phase, and it overrides phase-based decisions while active.
+
+**The problem:** Inside consolidation, each upward leg looks like a potential reclaim/continuation, and each downward leg looks like a correction extending. Without filtering, you take false signals on both sides of the range.
+
+**Detection rule (15m bars):**
+
+```
+Window: last 6 bars
+Combined spread = max high - min low across the window
+Sum of ranges = total of (high - low) for each individual bar
+Overlap ratio = combined spread / sum of ranges
+
+Flag CONSOLIDATING if:
+  overlap ratio < 0.35 for ≥ 2 consecutive bars
+
+Clear when:
+  overlap ratio > 0.5 for ≥ 2 consecutive bars
+  OR price closes decisively outside the consolidation high/low
+```
+
+**Interpretation of overlap ratio:**
+- **≈ 1.0** → Bars do not overlap. Price is trending. Each bar adds new range.
+- **0.5 – 0.7** → Some overlap. Price is moving but not strongly directional.
+- **< 0.35** → Heavy overlap. Bars are clustered in a horizontal box. Consolidating.
+
+**Why it works:** Range compression alone (looking at individual bar size) misses consolidations where bars look "normal" but all sit in the same box. The overlap ratio captures the box itself — if 6 bars combined only add 35 points of new ground despite each bar moving 25-30 points, that's chop, not trend.
+
+**While CONSOLIDATING is flagged:**
+- Do NOT enter, regardless of phase
+- Do NOT treat range-bound oscillations as phase transitions
+- The phase that was active before consolidation began remains the operating phase
+- Wait for the flag to clear (range expansion or breakout) before re-engaging the phase logic
 
 ### 4. Entry & Trade Plan (Continuation phase only)
 
@@ -92,6 +140,11 @@ Work through these **in order** — stop at the first match:
 When assessing any futures chart, produce the following:
 
 ```
+SUMMARY:
+[Plain-language summary using indication/correction/continuation as verbs.
+State which phase we are in NOW. Explain what we're waiting for and what 
+kills the thesis. Written for a complete novice.]
+
 ICC STATUS — [SYMBOL] [DATE]
 
 4H Trend:      [Bullish / Bearish / Choppy]
@@ -103,6 +156,9 @@ Invalidation:  [Previous PHL/PLH — one pivot back from the most recent]
 ICT Alignment: ChoCh [PRICE] | BOS: [PRICES] | Indication aligns with BOS: [Yes/No]
 
 Current Phase: [Indication / Correction / Continuation / No Trade (choppy)]
+               [Add "(Reclaim Pending*)" if price is oscillating around indication without 15m confirmation]
+Flags:         [CONSOLIDATING — 6-bar overlap X.XX, range LOW–HIGH] (if applicable)
+               [If flagged, do not enter regardless of phase]
 
 15m Structure: [Current pivot sequence on 15m]
 15m Confirms:  [Yes/No — structure matches expected behavior for current phase]
