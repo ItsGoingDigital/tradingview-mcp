@@ -83,40 +83,84 @@ Per TF: the **closest unmitigated demand below price** and the **closest unmitig
 
 ## Output template
 
-One block per symbol. Keep it tight.
+**Deliverable.** Save each session as a standalone markdown file in `analysis/` using filename format `YYYY-MM-DD-HHMMET.md` (24-hour, timezone suffix, e.g. `2026-04-22-1326ET.md`). Multiple sessions per day are expected. The file is the finished product — written for a paying Discord subscriber, not an internal analyst.
+
+**Canonical example:** see [`analysis/2026-04-22-1326ET.md`](../../analysis/2026-04-22-1326ET.md).
+
+### Audience & voice
+
+- **Audience:** hungry, eager-to-learn, eager-to-act traders paying premium for decisive counsel.
+- **Voice:** informative, clear, decisive. Active voice. Short sentences. AP style.
+- **Dates:** `April 22, 2026 · 1:26 p.m. ET` in prose. ISO in filenames.
+- **Numbers:** numerals for all prices, points, sizes, grades.
+
+### Grading rubric (A / B / C / D / F)
+
+Letter grade on every setup. Reflects confluence quality; does not override the Call — it informs sizing.
+
+- **A** — Every layer aligns: trend, cross-TF zone stack, tight size, liquidity magnet, fresh event. Take full size.
+- **B** — Strong setup missing one confluence. Take standard size.
+- **C** — Tradeable with a known risk (counter-trend, no cross-TF stack, wide zone). Reduce size or shorten hold.
+- **D** — Valid structure, thesis has a gap (usually missing liquidity magnet). Watch only.
+- **F** — Pass.
+
+Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-on-Midnight-Open geometry, etc.).
+
+### Document structure (in order)
+
+1. **Header** — `# Futures Playbook` + bold date/time + one-line vibe check.
+2. **Setup Grades legend** — the A/B/C/D/F rubric verbatim.
+3. **Top Call** — blockquote with top pick's Entry · Stop · Target, then 2–3 sentence thesis.
+4. **The Board** — 7-col summary: Symbol · Grade · Call · Entry · Stop · Target · Risk. Top pick bolded in Symbol and Grade cells.
+5. **Per-symbol sections** — identical structure across symbols (template below).
+6. **Bottom Line** — decisive recap: one swing + grade, tacticals + grades, passes + grades. One-line risk reminder close.
+
+### Per-symbol section (identical order every time)
 
 ```
-## {SYMBOL} — {price} ({description})
+## {TICKER} — {Description} · {price} · Grade {X}
 
-**Trend:** 4h {Up|Down|Consolidating} · 15m {Up|Down|Consolidating}
+**Trend:** 4h {Up/Down/Choppy} ({ICC phase}) · 15m {Up/Down/Choppy}
+**Call:** **{GO LONG / GO SHORT / WATCH / PASS}** — {one-line verdict}
+**Grade rationale:** {one line — what layers aligned or didn't}
 
-**Closest zones (unmitigated, within 100 pts):**
-| TF | Type | Entry | SL | Size | Distance |
-|----|------|-------|-----|------|----------|
-| 4h | demand | 26864.5 | 26779.75 | 84.75 pts | +38.5 above |
-| 15m | demand | 26849.25 | 26806 | 43.25 pts | +24 above |
-| 4h | supply | — | — | — | none within 100 pts |
-| 15m | supply | — | — | — | none within 100 pts |
+### Zones
 
-**Entry candidates:**
+| TF  | Type           | Range       | Size    | Note                         |
+|-----|----------------|-------------|---------|------------------------------|
+| 15m | Demand/Supply  | low — high  | X pts   | fresh / stale / stacked / … |
+| 4h  | Demand/Supply  | low — high  | X pts   | …                            |
 
-1. **Long @ 26849.25** (15m ChoCh demand) — SL 26806 · Risk 43.25 pts · TP 26979 (3R)
-   - Confluence: overlaps 4h demand 26779.75–26864.5 ✓
-   - Confluence: overlaps untouched FVG 26839–26866.25 ✓
-   - Size note: tight zone (43 pts) — favorable
+Optional note below table: "Zones overlap at X — X" (cross-TF stack).
 
-2. **Long @ 26864.5** (4h BOS demand) — SL 26779.75 · Risk 84.75 pts · TP 27118.75 (3R)
-   - Confluence: wraps 15m demand entirely ✓
-   - Size note: wider zone (85 pts) — less favorable; prefer 15m if both trigger
+### Liquidity
+
+- **Above (buy stops):** PDH X · PWH X · MO X · {cluster/taken flags}
+- **Below (sell stops):** DO X · PDL X · Month Open X · {cluster flags}
+
+### The Trade
+
+- **Entry:** X — {zone reference}
+- **Stop:** X — {invalidation}
+- **Target:** X — {magnet reference, 3R}
+- **Risk / Reward:** X pts / X pts
+- **Runner target (optional):** X — {extended magnet}
+
+### The Read
+
+{2–3 sentences. Plain-English thesis: what price is doing, why the setup works, what kills it.}
 ```
 
-If a symbol has **no unmitigated zones within 100 pts** in either direction, say so in one line and move on — do not invent zones.
+### ICC phase (4h only)
 
-## Context budget
+Append the ICC phase to the 4h trend label in parentheses: `4h Up (Continuation)`. Do **not** add it to the 15m — it gets confusing. Phases: Indication · Correction · Continuation · No Trade (choppy). See [`docs/strategies/icc.md`](../../docs/strategies/icc.md) for definitions. Does not affect grading.
 
-- Target total output: one screen per symbol, ~400–600 bytes.
-- Never dump the raw `data_get_structure_zones` JSON to the user. Summarize into the table + candidate bullets.
-- Don't screenshot unless the user asks — the numeric report is sufficient.
+### Context budget
+
+- Each symbol section: ~1,000–1,500 bytes. The newsletter is the deliverable, not raw telemetry.
+- Never dump raw tool JSON. Summarize into the tables and prose above.
+- No screenshots unless the user asks.
+- If a symbol has no unmitigated zones within the search window in either direction, give it a one-line "No actionable setup" note and move on. Do not invent zones.
 
 ## Rules (no exceptions)
 
