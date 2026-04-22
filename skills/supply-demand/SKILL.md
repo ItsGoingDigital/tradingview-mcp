@@ -7,6 +7,8 @@ description: Analyze supply and demand zones on futures charts using Lux Algo Ma
 
 Produce a clean, decision-ready report per symbol using only **basic market structure** and **S&D zones**. Do not pull from other strategies (ICC, PD Array, ICT, Silver Bullet, etc.) — strict separation.
 
+Background on the principle itself — zone types, drawing theory, why flip zones flip, multi-timeframe rationale — lives in [REFERENCE.md](REFERENCE.md). REFERENCE is reading material, not an override: when this skill and REFERENCE differ, this skill wins.
+
 ## Vocabulary (stay inside this set)
 
 - **Market structure:** HH, HL, LH, LL. Trend = Up / Down / Consolidating.
@@ -32,6 +34,10 @@ If either is missing on `chart_get_state`, stop and tell the user — don't gues
 - Symbols (unless user overrides): `MNQ1!`, `MES1!`, `SIL1!`, `MGC1!`. Use full CME/COMEX prefixes if plain symbols fail (`CME_MINI:MNQ1!`, `COMEX:MGC1!`).
 - Timeframes: **4h** then **15m** (pair).
 - Fallback pair: **1h** + **5m** — ask the user before switching.
+
+## Session notes (MGC, SIL)
+
+Metals zones can be delivered overnight — overnight is not "thin." Tradeable windows (avg hourly range ≈ RTH): **21:00 ET** (Shanghai AM) and **07:00–09:00 ET** (Europe / US pre-open). Dead zones to skip: **23:00–01:00 ET** and **04:00–06:00 ET**.
 
 ## Workflow
 

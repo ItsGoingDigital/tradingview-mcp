@@ -2,6 +2,15 @@
 
 68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
+## Where to find docs
+
+- [docs/setup.md](docs/setup.md) — installation / CDP flag
+- [docs/research.md](docs/research.md) — research motivation & open questions
+- [docs/strategies/icc.md](docs/strategies/icc.md) — ICC phase framework (Indication / Correction / Continuation)
+- [docs/strategies/ict-principles.md](docs/strategies/ict-principles.md) — ICT theory (liquidity, FVGs, PD arrays, killzones)
+- [skills/supply-demand/REFERENCE.md](skills/supply-demand/REFERENCE.md) — S&D zone rules (skill-owned)
+- [skills/silver-bullet/REFERENCE.md](skills/silver-bullet/REFERENCE.md) — MNQ 10–11 AM setup (skill-owned)
+
 ## Decision Tree — Which Tool When
 
 ### "What's on my chart right now?"

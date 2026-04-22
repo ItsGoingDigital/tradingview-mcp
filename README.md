@@ -43,7 +43,7 @@ Specifically it investigates:
 
 This is not a trading bot. It is an interface layer that makes a trading application legible to an LLM agent, allowing researchers and developers to study human-AI collaboration in financial workflows.
 
-See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
+See [RESEARCH.md](docs/research.md) for open questions, findings, and related work.
 
 ## Prerequisites
 
