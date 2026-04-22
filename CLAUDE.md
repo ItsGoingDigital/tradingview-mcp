@@ -19,6 +19,11 @@ Custom Pine indicators draw with `line.new()`, `label.new()`, `table.new()`, `bo
 
 Use `study_filter` parameter to target a specific indicator by name substring (e.g., `study_filter: "Profiler"`).
 
+### "What S&D zones are live?"
+For Lux Algo Market Structure (Fractal) ChoCh/BoS events specifically:
+
+- `data_get_structure_zones` → pairs solid+dashed lines per event, derives direction by geometry, filters to unmitigated (dashed line still open). Returns `{event, direction, zone_type, entry, sl, risk, tp_3R, size, mitigated}`. Use `within_points` to bound the ±distance from current price. Entry = solid (ChoCh/BoS label price); SL = dashed (paired pivot); TP pre-computed at 3R.
+
 ### "Give me price data"
 - `data_get_ohlcv` with `summary: true` → compact stats (high, low, range, change%, avg volume, last 5 bars)
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
@@ -106,6 +111,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_pine_labels` | ~2-5 KB per study (capped at 50) |
 | `data_get_pine_tables` | ~1-4 KB per study (formatted rows) |
 | `data_get_pine_boxes` | ~1-2 KB per study (deduplicated zones) |
+| `data_get_structure_zones` | ~300 bytes with `within_points` filter (compact zone objects) |
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |

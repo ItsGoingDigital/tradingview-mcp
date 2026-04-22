@@ -79,6 +79,16 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('data_get_structure_zones', 'Read BOS/ChoCh structure zones from Lux Algo Market Structure (Fractal) — pairs solid+dashed lines per event, derives direction by geometry, and filters to unmitigated (dashed line still open). Returns compact zones with entry/SL/3R TP for S&D analysis.', {
+    study_filter: z.string().optional().describe('Substring to match study name (default: "Market Structure").'),
+    within_points: z.coerce.number().optional().describe('Only return zones whose entry is within N points of current price (both directions).'),
+    current_price: z.coerce.number().optional().describe('Override current price (auto-fetched if omitted).'),
+    include_mitigated: z.coerce.boolean().optional().describe('Include mitigated zones in output (default false).'),
+  }, async ({ study_filter, within_points, current_price, include_mitigated }) => {
+    try { return jsonResult(await core.getStructureZones({ study_filter, within_points, current_price, include_mitigated })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

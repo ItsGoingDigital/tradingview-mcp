@@ -29,6 +29,12 @@ export async function start({ date, _deps } = {}) {
   // page context, otherwise the promise is fire-and-forget and replay state says
   // "started" but stepping doesn't work (issue #26).
   if (date) {
+    // TV's selectDate() only accepts date-granular timestamps. Passing a datetime
+    // corrupts the replay session — the chart enters a "This symbol doesn't exist"
+    // state that cannot be recovered via tool calls. Enforce strict YYYY-MM-DD.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format only — time components are not supported and corrupt the replay session. Use replay_step after starting to advance to a specific intraday time.`);
+    }
     const ts = new Date(date).getTime();
     if (isNaN(ts)) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format.`);
     await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);

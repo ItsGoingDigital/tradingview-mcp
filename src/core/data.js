@@ -429,6 +429,124 @@ export async function getPineTables({ study_filter } = {}) {
   return { success: true, study_count: studies.length, studies };
 }
 
+export async function getStructureZones({ study_filter, within_points, current_price, include_mitigated } = {}) {
+  const filter = study_filter || 'Market Structure';
+  const [linesRaw, labelsRaw, price] = await Promise.all([
+    evaluate(buildGraphicsJS('dwglines', 'lines', filter)),
+    evaluate(buildGraphicsJS('dwglabels', 'labels', filter)),
+    current_price != null ? Promise.resolve(current_price) : evaluate(`
+      (function() {
+        var bars = ${BARS_PATH};
+        if (!bars || typeof bars.lastIndex !== 'function') return null;
+        var last = bars.valueAt(bars.lastIndex());
+        return last ? last[4] : null;
+      })()
+    `),
+  ]);
+
+  if (!linesRaw || linesRaw.length === 0) {
+    return { success: true, study_count: 0, current_price: price, studies: [] };
+  }
+
+  const labelsByStudy = {};
+  if (labelsRaw) {
+    for (const s of labelsRaw) {
+      labelsByStudy[s.name] = s.items
+        .map(i => ({ price: i.raw.y != null ? Math.round(i.raw.y * 100) / 100 : null, x: i.raw.x, text: i.raw.t || '' }))
+        .filter(l => l.price != null);
+    }
+  }
+
+  const studies = linesRaw.map(s => {
+    const lines = s.items
+      .map(i => ({
+        id: i.id,
+        y1: i.raw.y1 != null ? Math.round(i.raw.y1 * 100) / 100 : null,
+        y2: i.raw.y2 != null ? Math.round(i.raw.y2 * 100) / 100 : null,
+        x1: i.raw.x1,
+        x2: i.raw.x2,
+        style: i.raw.st,
+        color: i.raw.ci,
+      }))
+      .filter(l => l.y1 != null && l.y1 === l.y2);
+
+    if (lines.length === 0) return { name: s.name, total_events: 0, unmitigated_count: 0, zones: [] };
+
+    const dshs = lines.filter(l => l.style === 'dsh');
+    const sols = lines.filter(l => l.style === 'sol').sort((a, b) => a.x1 - b.x1);
+    if (sols.length === 0 || dshs.length === 0) return { name: s.name, total_events: 0, unmitigated_count: 0, zones: [] };
+
+    const maxDshX2 = dshs.reduce((m, l) => Math.max(m, l.x2), 0);
+    const labels = labelsByStudy[s.name] || [];
+
+    const usedDshIds = new Set();
+    const pairs = [];
+    for (const sol of sols) {
+      let best = null;
+      let bestDist = Infinity;
+      for (const dsh of dshs) {
+        if (usedDshIds.has(dsh.id)) continue;
+        if (dsh.color !== sol.color) continue;
+        const dist = Math.abs(dsh.x1 - sol.x1);
+        if (dist <= 3 && dist < bestDist) { best = dsh; bestDist = dist; }
+      }
+      if (best) {
+        usedDshIds.add(best.id);
+        pairs.push({ sol, dsh: best });
+      }
+    }
+
+    const zones = pairs.map(p => {
+      const bullish = p.sol.y1 > p.dsh.y1;
+      const entry = p.sol.y1;
+      const sl = p.dsh.y1;
+      const risk = Math.round(Math.abs(entry - sl) * 100) / 100;
+      const tp = bullish ? entry + 3 * risk : entry - 3 * risk;
+      const mitigated = p.dsh.x2 < maxDshX2;
+      let eventText = '';
+      let bestLabelDist = Infinity;
+      for (const lab of labels) {
+        if (Math.abs(lab.price - p.sol.y1) > 0.01) continue;
+        const d = Math.abs(lab.x - p.sol.x1);
+        if (d <= 3 && d < bestLabelDist) { eventText = lab.text; bestLabelDist = d; }
+      }
+      return {
+        event: eventText || (bullish ? 'BULL' : 'BEAR'),
+        direction: bullish ? 'bullish' : 'bearish',
+        zone_type: bullish ? 'demand' : 'supply',
+        entry,
+        sl,
+        risk,
+        tp_3R: Math.round(tp * 100) / 100,
+        size: risk,
+        bar_idx: p.sol.x1,
+        mitigated,
+      };
+    });
+
+    let filtered = include_mitigated ? zones : zones.filter(z => !z.mitigated);
+
+    if (within_points != null && price != null) {
+      filtered = filtered.filter(z => Math.abs(z.entry - price) <= within_points);
+    }
+
+    if (price != null) {
+      filtered.sort((a, b) => Math.abs(a.entry - price) - Math.abs(b.entry - price));
+    } else {
+      filtered.sort((a, b) => b.entry - a.entry);
+    }
+
+    return {
+      name: s.name,
+      total_events: pairs.length,
+      unmitigated_count: zones.filter(z => !z.mitigated).length,
+      zones: filtered,
+    };
+  });
+
+  return { success: true, study_count: studies.length, current_price: price, studies };
+}
+
 export async function getPineBoxes({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));

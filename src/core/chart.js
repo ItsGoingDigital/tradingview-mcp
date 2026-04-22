@@ -115,7 +115,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,9 +158,10 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   let timestamp;
-  if (/^\d+$/.test(date)) timestamp = Number(date);
+  if (/^\d+$/.test(String(date))) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
   if (isNaN(timestamp)) throw new Error(`Could not parse date: ${date}. Use ISO format (2024-01-15) or unix timestamp.`);
 
@@ -170,6 +172,31 @@ export async function scrollToDate({ date }) {
   else if (res === 'W' || res === '1W') secsPerBar = 604800;
   else if (res === 'M' || res === '1M') secsPerBar = 2592000;
   else { const mins = parseInt(res, 10); if (!isNaN(mins)) secsPerBar = mins * 60; }
+
+  // Backfill historical bars if the target is before what's currently loaded.
+  // TV lazy-loads ~1000-1500 bars per off-chart zoom trigger; iterate until
+  // the first loaded bar is at or before the target.
+  let backfillIterations = 0;
+  for (let i = 0; i < 30; i++) {
+    const firstBarTime = await evaluate(`
+      (function() {
+        var bars = ${CHART_API}._chartWidget.model().mainSeries().bars();
+        var b = bars.valueAt(bars.firstIndex());
+        return b ? b[0] : null;
+      })()
+    `);
+    if (firstBarTime !== null && firstBarTime <= timestamp) break;
+    await evaluate(`
+      (function() {
+        var m = ${CHART_API}._chartWidget.model();
+        var bars = m.mainSeries().bars();
+        var si = bars.firstIndex();
+        m.timeScale().zoomToBarsRange(si - 1500, si - 1000);
+      })()
+    `);
+    await new Promise(r => setTimeout(r, 2500));
+    backfillIterations = i + 1;
+  }
 
   const halfWindow = 25 * secsPerBar;
   const from = timestamp - halfWindow;
@@ -193,10 +220,11 @@ export async function scrollToDate({ date }) {
     })()
   `);
   await new Promise(r => setTimeout(r, 500));
-  return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
+  return { success: true, date, centered_on: timestamp, resolution, window: { from, to }, backfill_iterations: backfillIterations };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
