@@ -45,12 +45,37 @@ Metals zones can be delivered overnight — overnight is not "thin." Tradeable w
 
 1. `chart_set_symbol`
 2. `chart_set_timeframe` (240 for 4h, 15 for 15m)
-3. Brief wait for indicator recompute (the tool returns `chart_ready` but primitives may lag ~1s — acceptable).
+3. Brief wait for indicator recompute (the tool returns `chart_ready` but primitives may lag ~1s — acceptable). When the symbol has just been switched, allow a few seconds before pulling data — otherwise studies may return `study_count: 0`.
 4. `data_get_structure_zones` with `study_filter: "Market Structure"`, `within_points: 100` → returns all unmitigated zones within ±100 pts of current price, sorted nearest first. Each zone object: `{event, direction, zone_type, entry, sl, risk, tp_3R, size, bar_idx, mitigated}`.
 5. `data_get_pine_boxes` with `study_filter: "FVG"` → returns live FVG zones as `{high, low}` arrays per FVG indicator instance.
-6. `quote_get` (already folded into `data_get_structure_zones.current_price`, but call separately if you need OHLC or description).
+6. `data_get_pine_labels` with `study_filter: "ICT Killzones"` → returns the ICT level set (PDH/PDL/PWH/PWL/PMH/PML/D Open/W Open/M Open/Midnight Open) as `{text, price}` pairs. Required for step 2.
+7. `data_get_ohlcv` with `count: 60, summary: true` on the **15m timeframe** → today's session high/low (~15 hours, ≈ full futures session since 18:00 ET prior day). Required for step 2.
+8. `quote_get` (already folded into `data_get_structure_zones.current_price`, but call separately if you need OHLC or description).
 
-### 2. Derive the trend per TF
+### 2. Verify today's session state (MANDATORY — do not skip)
+
+**Without this check, any report that cites magnets or fresh zones is data-incorrect.** A swept level is not a magnet; buy-stops above or sell-stops below are already gone. A 3R target that the session has already traded past is a thesis that has already played out.
+
+For each symbol, compute the session high and low from the 60-bar 15m OHLCV, then cross-check three things:
+
+1. **Labels vs session range.** For each ICT label, compare to session high/low:
+   - If label is *above* current price and session high ≥ label → label is **TAKEN**. Mark `(taken)` in the Liquidity section.
+   - If label is *below* current price and session low ≤ label → label is **TAKEN**. Mark `(taken)` in the Liquidity section.
+   - Otherwise → **alive**. This is a live magnet.
+
+2. **Zone SL vs session range.** For each unmitigated zone, compare SL to session high/low:
+   - Supply zone: if session high ≥ zone SL → **wick-tested**. Flag in the Zones table Note column.
+   - Demand zone: if session low ≤ zone SL → **wick-tested**. Flag in the Zones table Note column.
+   - A wick-tested zone is structurally weaker than a fresh zone. Downgrade grade accordingly.
+
+3. **3R target vs session range.** For each proposed entry's `tp_3R`:
+   - Short thesis: if session low ≤ tp_3R → the target has already been hit this session. The thesis has **already played out**.
+   - Long thesis: if session high ≥ tp_3R → same, thesis already played out.
+   - In either case, the trade is not a live setup. Re-frame as "move already completed" and either downgrade hard (D/F) or pass. Do not pitch a TP the session has already traded through.
+
+**Morning red flag.** Friday and Monday mornings especially tend to have overnight/European moves that consume the clean liquidity before RTH. When running the skill between 06:00–10:00 ET, default to assuming levels may already be swept — the OHLCV check will confirm or reject.
+
+### 3. Derive the trend per TF
 
 Use the **sequence of the last ~6 BOS/ChoCh events** from `data_get_structure_zones` (pass `include_mitigated: true` for this step to see the recent history — then filter the analysis).
 
@@ -60,7 +85,7 @@ Use the **sequence of the last ~6 BOS/ChoCh events** from `data_get_structure_zo
 
 If 4h and 15m both look consolidating, **stop and ask** the user: *"4h and 15m are consolidating — want me to analyze 1h and 5m instead?"*
 
-### 3. Build entries
+### 4. Build entries
 
 For each unmitigated zone returned by `data_get_structure_zones`, the tool has already computed:
 - `entry` = solid line price
@@ -70,14 +95,14 @@ For each unmitigated zone returned by `data_get_structure_zones`, the tool has a
 
 Present entry/SL/TP **in points** (no dollar math). Note size (= risk in points) — smaller zones are preferred.
 
-### 4. Check confluence
+### 5. Check confluence
 
 For each proposed entry, flag these (bullet per hit):
 - **Cross-TF same-direction zone overlap:** a 4h demand zone overlaps a 15m demand zone if `[min(entry,sl), max(entry,sl)]` ranges intersect. Same for supply.
 - **FVG overlap on same TF:** iterate the FVG `zones` array and flag if any FVG `[low, high]` intersects the S&D zone range.
 - **Untouched FVG bonus:** Nephew_Sam auto-removes mitigated FVGs — so any FVG box still present on chart is a candidate. Flag it as "untouched FVG confluence" when it overlaps.
 
-### 5. Closest zones section
+### 6. Closest zones section
 
 Per TF: the **closest unmitigated demand below price** and the **closest unmitigated supply above price**. The tool's output is already sorted by distance from price — demand below is the nearest zone with `entry < current_price`, supply above is the nearest with `entry > current_price`. If there are none within 100 pts in a given direction, say so.
 
@@ -126,17 +151,21 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 
 ### Zones
 
-| TF  | Type           | Range       | Size    | Note                         |
-|-----|----------------|-------------|---------|------------------------------|
-| 15m | Demand/Supply  | low — high  | X pts   | fresh / stale / stacked / … |
-| 4h  | Demand/Supply  | low — high  | X pts   | …                            |
+| TF  | Type           | Range       | Size    | Note                                          |
+|-----|----------------|-------------|---------|-----------------------------------------------|
+| 15m | Demand/Supply  | low — high  | X pts   | fresh / wick-tested (X high/low) / stacked   |
+| 4h  | Demand/Supply  | low — high  | X pts   | …                                             |
 
 Optional note below table: "Zones overlap at X — X" (cross-TF stack).
 
+**Note column is mandatory.** Every zone must be flagged as `fresh` or `wick-tested (X)` per step 2 of the workflow. FVG overlap and cross-TF stack go here too.
+
 ### Liquidity
 
-- **Above (buy stops):** PDH X · PWH X · MO X · {cluster/taken flags}
-- **Below (sell stops):** DO X · PDL X · Month Open X · {cluster flags}
+Every level cited must carry `(taken)` or `(alive)` per step 2 of the workflow. A level without a status marker fails the mandatory sweep check.
+
+- **Above (buy stops):** PDH X (taken/alive) · PWH X (taken/alive) · Midnight Open X (taken/alive) · …
+- **Below (sell stops):** D Open X (taken/alive) · PDL X (taken/alive) · Month Open X (taken/alive) · PWL X (taken/alive) · …
 
 ### The Trade
 
@@ -171,3 +200,4 @@ Append the ICC phase to the 4h trend label in parentheses: `4h Up (Continuation)
 5. If 4h/15m is unclear (both consolidating, or conflicting trends with no same-direction confluence), ask before falling back to 1h/5m.
 6. Do not import vocabulary from other strategies. No "bias," "PD Array," "indication," "correction," etc.
 7. Tighter zones beat wider zones — always note size in the report.
+8. **MANDATORY session-sweep check (step 2).** Before publishing, pull 60-bar 15m OHLCV and cross-check every cited label, zone SL, and 3R target against session high/low. Mark every label `(taken)` or `(alive)`. Mark every zone `fresh` or `wick-tested`. If a 3R target has already been traded through this session, the trade is not live — downgrade or pass. A report missing these markers is data-incorrect. Skipping this check has cost real money (see `feedback_verify_swept_levels.md` in memory).
