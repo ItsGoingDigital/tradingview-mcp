@@ -41,18 +41,62 @@ Metals zones can be delivered overnight — overnight is not "thin." Tradeable w
 
 ## Workflow
 
-### 1. Per symbol, per timeframe
+The workflow runs in three stages. Stage 1 polls every symbol fast and decides which qualify for deep work. Stage 2 runs the expensive frameworks (15m structure, session-sweep, FVG color decode, ICC level derivation) only on candidates. Stage 3 composes the playbook. Skipped symbols still appear on The Board with grade D/F and a one-line skip reason — no per-symbol section.
 
-1. `chart_set_symbol`
-2. `chart_set_timeframe` (240 for 4h, 15 for 15m)
-3. Brief wait for indicator recompute (the tool returns `chart_ready` but primitives may lag ~1s — acceptable). When the symbol has just been switched, allow a few seconds before pulling data — otherwise studies may return `study_count: 0`.
-4. `data_get_structure_zones` with `study_filter: "Market Structure"`, `within_points: 100` → returns all unmitigated zones within ±100 pts of current price, sorted nearest first. Each zone object: `{event, direction, zone_type, entry, sl, risk, tp_3R, size, bar_idx, mitigated}`.
-5. `data_get_pine_boxes` with `study_filter: "FVG"` → returns live FVG zones as `{high, low}` arrays per FVG indicator instance.
-6. `data_get_pine_labels` with `study_filter: "ICT Killzones"` → returns the ICT level set (PDH/PDL/PWH/PWL/PMH/PML/D Open/W Open/M Open/Midnight Open) as `{text, price}` pairs. Required for step 2.
-7. `data_get_ohlcv` with `count: 60, summary: true` on the **15m timeframe** → today's session high/low (~15 hours, ≈ full futures session since 18:00 ET prior day). Required for step 2.
-8. `quote_get` (already folded into `data_get_structure_zones.current_price`, but call separately if you need OHLC or description).
+### Stage 1 — Triage scan (every default symbol)
 
-### 2. Verify today's session state (MANDATORY — do not skip)
+Goal: cheaply decide which symbols have an actionable setup before paying for 15m + FVG + ICC + OHLCV depth. Budget: ≤ 4 tool calls per symbol.
+
+For each symbol:
+
+1. `chart_set_symbol` → `chart_set_timeframe` 240. Brief wait (~3s) on first switch for indicator recompute.
+2. Parallel pull:
+   - `data_get_structure_zones` with `study_filter: "Market Structure"`, `within_points: 100`
+   - `data_get_pine_labels` with `study_filter: "ICT Killzones"`
+3. Apply Qualify rules below.
+
+#### Qualify rules — symbol passes to Stage 2 only if ALL hold
+
+1. **Zone present.** At least one unmitigated 4h zone within 100 points of price.
+2. **Aligned magnet alive.** At least one alive ICT level on the side the zone direction implies, within roughly 3R of zone entry. Demand → an alive level above price (PDH/PWH/PMH/Day Open/Week Open/Month Open). Supply → an alive level below (PDL/PWL/PML/Day Open/Week Open/Month Open). "Alive" by the same session-sweep rule used in Stage 2 — but Stage 1 only needs the simpler check: *is the label between price and the 3R target?* Full session-sweep happens in Stage 2.
+3. **Daily-extreme sanity.** If the zone is demand and BOTH PDH and PWH are below the 3R target (i.e., the only upside magnets in the path), AND both are taken (session high ≥ each), → skip. Mirror for supply with PDL/PWL. This codifies the "both extremes spent" case (MNQ on the 2026-04-26 run): the structure exists, but the day has no destination. Skip with verdict "both extremes spent."
+
+#### Stage 1 deliverable — Triage table
+
+Build a short table before any Stage 2 work begins. One row per symbol.
+
+| Symbol | Price | 4h zone | Aligned magnet | Verdict |
+|--------|-------|---------|----------------|---------|
+| MNQ1!  | 27401 | none in range | — | SKIP — no zone in range |
+| MES1!  | 7180  | demand 7079.75 — 7173 | PWL 7079.75 alive | CANDIDATE |
+| ...    | ...   | ...     | ...            | ...     |
+
+Verdict values: `CANDIDATE`, `SKIP — no zone in range`, `SKIP — both extremes spent`, `SKIP — no aligned magnet alive`.
+
+Skipped symbols carry forward with their verdict to Stage 3 (one-line Board entry, no per-symbol section). Candidates proceed to Stage 2.
+
+If 4h trend on every candidate looks consolidating, **stop and ask** the user: *"4h is consolidating across candidates — want me to drop to 1h instead?"*
+
+### Stage 2 — Deep dive (candidates only)
+
+Budget: ≤ 6 tool calls per candidate. Skip the symbol if a step would push past budget without changing the grade decision.
+
+#### 2.1 Pull 15m structure + session OHLCV
+
+1. `chart_set_timeframe` 15
+2. Parallel:
+   - `data_get_structure_zones` with `study_filter: "Market Structure"`, `within_points: 100`
+   - `data_get_ohlcv` with `count: 60, summary: true` → today's session high/low (~15 hours, ≈ full futures session since 18:00 ET prior day)
+
+#### 2.2 Pull FVG boxes (verbose for color decode)
+
+3. `data_get_pine_boxes` with `study_filter: "FVG"`, `verbose: true`. Decode `borderColor` as ABGR per `feedback_fvg_color_decoding` memory: green/teal-leaning → bullish FVG, red/orange-leaning → bearish FVG, mid-blue → iFVG (skip). Every FVG cited downstream must carry a direction prefix.
+
+#### 2.3 Derive ICC ind / TP / inv (mandatory on 4h)
+
+4. `chart_set_timeframe` 240 → `data_get_structure_zones` with `include_mitigated: true`, `within_points: 500`. Use the recent BOS/ChoCh sequence to derive `ind` (broken pivot), `TP` (resulting new HH/LL — only set once a pullback has crystallized it as a pivot, otherwise show `TP forming`), and `inv` (the previous PHL/PLH one back from the most recent). All three are reference-only and must appear in the 4h trend label. Phase choice (Indication / Correction / Continuation / No Trade) must be consistent with where current price sits relative to `ind` and `TP`.
+
+#### 2.4 Verify today's session state (MANDATORY — do not skip)
 
 **Without this check, any report that cites magnets or fresh zones is data-incorrect.** A swept level is not a magnet; buy-stops above or sell-stops below are already gone. A 3R target that the session has already traded past is a thesis that has already played out.
 
@@ -75,17 +119,17 @@ For each symbol, compute the session high and low from the 60-bar 15m OHLCV, the
 
 **Morning red flag.** Friday and Monday mornings especially tend to have overnight/European moves that consume the clean liquidity before RTH. When running the skill between 06:00–10:00 ET, default to assuming levels may already be swept — the OHLCV check will confirm or reject.
 
-### 3. Derive the trend per TF
+#### 2.5 Derive the trend per TF
 
-Use the **sequence of the last ~6 BOS/ChoCh events** from `data_get_structure_zones` (pass `include_mitigated: true` for this step to see the recent history — then filter the analysis).
+Use the **sequence of the last ~6 BOS/ChoCh events** from the data pulled in 2.3 (4h, with `include_mitigated: true`) and the 15m zones from 2.1.
 
 - **Up:** consecutive bullish BOS/ChoCh, making HH + HL.
 - **Down:** consecutive bearish BOS/ChoCh, making LH + LL.
 - **Consolidating:** alternating bullish/bearish within a tight range (no net new HH or LL).
 
-If 4h and 15m both look consolidating, **stop and ask** the user: *"4h and 15m are consolidating — want me to analyze 1h and 5m instead?"*
+If 4h and 15m both look consolidating on a candidate, **stop and ask** the user: *"4h and 15m are consolidating on {SYMBOL} — want me to analyze 1h and 5m instead?"*
 
-### 4. Build entries
+#### 2.6 Build entries
 
 For each unmitigated zone returned by `data_get_structure_zones`, the tool has already computed:
 - `entry` = solid line price
@@ -95,14 +139,14 @@ For each unmitigated zone returned by `data_get_structure_zones`, the tool has a
 
 Present entry/SL/TP **in points** (no dollar math). Note size (= risk in points) — smaller zones are preferred.
 
-**TP realism check (ICT-level magnets).** The 3R target is arithmetic, not market reality. Build the magnet set from levels already pulled in step 1.6, plus three derived equilibriums:
+**TP realism check (ICT-level magnets).** The 3R target is arithmetic, not market reality. Build the magnet set from levels already pulled in Stage 1, plus three derived equilibriums:
 
 - **Pulled levels:** PDH/PDL, PWH/PWL, PMH/PML, D Open, W Open, M Open, Midnight Open.
 - **Derived equilibriums:** **PD-EQ** = (PDH + PDL) / 2 · **PW-EQ** = (PWH + PWL) / 2 · **PM-EQ** = (PMH + PML) / 2. Compute inline; not drawn by the indicator.
 
-Scan the range between `entry` and `tp_3R` for any *alive* level (skip taken ones — they're not magnets anymore). Apply the same session-sweep rule from step 2 to the EQ levels: if session high/low has already traded through the EQ price, it's taken. Any alive hit inside the range is a likely reaction point that overrides the arithmetic 3R. Surface it in **The Trade** block as the realistic target; keep the 3R figure as the math reference. If multiple alive levels sit inside the range, the nearest one to entry is the primary TP, the next becomes the runner.
+Scan the range between `entry` and `tp_3R` for any *alive* level (skip taken ones — they're not magnets anymore). Apply the same session-sweep rule from 2.4 to the EQ levels: if session high/low has already traded through the EQ price, it's taken. Any alive hit inside the range is a likely reaction point that overrides the arithmetic 3R. Surface it in **The Trade** block as the realistic target; keep the 3R figure as the math reference. If multiple alive levels sit inside the range, the nearest one to entry is the primary TP, the next becomes the runner.
 
-### 5. Check confluence
+#### 2.7 Check confluence
 
 **FVG direction matters.** A bullish FVG is a gap created during an up-move and acts as future support — confluence for a long entry / demand zone. A bearish FVG is a gap created during a down-move and acts as future resistance — confluence for a short entry / supply zone. The Nephew_Sam indicator color-codes them: green/blue = bullish, red/orange = bearish. **A wrong-direction FVG over a zone is anti-confluence, not bonus.** Every FVG reference in the report must carry its direction prefix ("bullish FVG" / "bearish FVG"); a bare "FVG" reference is incomplete and fails review.
 
@@ -111,9 +155,9 @@ For each proposed entry, flag these (bullet per hit):
 - **FVG overlap on same TF:** iterate the FVG `zones` array and flag if any same-direction FVG `[low, high]` intersects the S&D zone range. Note the direction in the flag ("bullish FVG below at X — Y").
 - **Untouched FVG bonus:** Every FVG box still on chart is unmitigated by definition (Nephew_Sam removes mitigated ones) — that's not the bonus. The bonus is for **untouched same-direction** FVGs: price has not wicked back into the zone since it formed. Detect by comparing the FVG's `[low, high]` against the bar range since the FVG's creation — no overlap = untouched. Touched-but-unmitigated FVGs still count as plain FVG confluence; only untouched same-direction earns the bonus flag. A wrong-direction untouched FVG is not a bonus — flag it as a hazard if it sits between price and target.
 
-#### Cluster check (high-probability reversal flag)
+##### Cluster check (high-probability reversal flag)
 
-A **cluster** is the rare case where all three confluence factors stack inside a tight band. These are the highest-probability reversal points the strategy can identify. Check every symbol; expect most reports to find none.
+A **cluster** is the rare case where all three confluence factors stack inside a tight band. These are the highest-probability reversal points the strategy can identify. Check every candidate; expect most reports to find none.
 
 A cluster exists when **all three** of the following sit within a tight band (defined below), in the **same direction**, and within 100 points of current price:
 
@@ -134,9 +178,18 @@ Use the zone width as your reference, not a hard point cap. A 50-point 4h zone w
 
 **If no cluster:** omit the callout entirely. Do not write "no cluster found."
 
-### 6. Closest zones section
+#### 2.8 Closest zones section
 
 Per TF: the **closest unmitigated demand below price** and the **closest unmitigated supply above price**. The tool's output is already sorted by distance from price — demand below is the nearest zone with `entry < current_price`, supply above is the nearest with `entry > current_price`. If there are none within 100 pts in a given direction, say so.
+
+### Stage 3 — Synthesis
+
+Compose the playbook per the Output template below.
+
+- **The Board:** one row per default symbol — both candidates and skipped. Skipped symbols carry their Stage 1 verdict in the Call cell ("PASS — no zone in range," "PASS — both extremes spent," etc.) and grade D (no zone in range / no aligned magnet) or F (both extremes spent — actively avoid). Entry/Stop/Target/Risk cells are `—`.
+- **Per-symbol sections:** render only for Stage 2 candidates. Skipped symbols do **not** get a per-symbol section, Liquidity map, Zones table, or The Trade block.
+- **Top Call:** must be a Stage 2 candidate. If no candidate qualifies, write `**Top Call:** none — all symbols skipped at triage` and skip the blockquote.
+- **Bottom Line:** name the swing with grade, the watch list with grades, and the skipped symbols with grades and skip reasons.
 
 ## Output template
 
@@ -175,9 +228,9 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 1. **Header** — `# Futures Playbook` + bold date/time + one-line vibe check.
 2. **Setup Grades legend** — the A/B/C/D/F rubric verbatim.
 3. **Top Call** — blockquote with top pick's Entry · Stop · Target, then a thesis of **three sentences maximum**. The Top Call is the most decisive line in the document. No hedges: no "either way," no "scale in if you want," no "roughly," no "tactical" as a softener, no "if X happens, do Y; if not, do Z" branches. If the setup needs hedging to be defensible, it does not belong as the Top Call — demote it to a per-symbol section and pick a different top.
-4. **The Board** — 7-col summary: Symbol · Grade · Call · Entry · Stop · Target · Risk. Top pick bolded in Symbol and Grade cells.
-5. **Per-symbol sections** — identical structure across symbols (template below).
-6. **Bottom Line** — decisive recap: one swing + grade, tacticals + grades, passes + grades. One-line risk reminder close.
+4. **The Board** — 7-col summary: Symbol · Grade · Call · Entry · Stop · Target · Risk. Top pick bolded in Symbol and Grade cells. **One row per default symbol, including Stage 1 skips.** Skipped rows: grade D (no zone in range / no aligned magnet) or F (both extremes spent). Call cell carries the skip reason verbatim from the Stage 1 verdict ("PASS — no zone in range," "PASS — both extremes spent," "PASS — no aligned magnet alive"). Entry/Stop/Target/Risk cells are `—`.
+5. **Per-symbol sections** — identical structure across symbols (template below). **Render only for Stage 2 candidates.** Skipped symbols stop at their Board row — no per-symbol section.
+6. **Bottom Line** — decisive recap: one swing + grade, tacticals + grades, skipped symbols + grades + skip reason. One-line risk reminder close.
 
 ### Per-symbol section (identical order every time)
 
@@ -190,7 +243,7 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 
 **Liquidity map:** {one plain-English sentence — where the magnet still sits, which side got grabbed already, and where the day wants to go. Run it past the vocabulary check below before publishing.}
 
-**Cluster:** {OPTIONAL — only when all three confluence factors stack inside a tight band per step 5's cluster check. Format: list the zone, the untouched same-direction FVG, and the alive key level with prices, state the band width, end with "high-probability reversal." Omit the line entirely when no cluster is detected — do not write "no cluster found."}
+**Cluster:** {OPTIONAL — only when all three confluence factors stack inside a tight band per Stage 2.7's cluster check. Format: list the zone, the untouched same-direction FVG, and the alive key level with prices, state the band width, end with "high-probability reversal." Omit the line entirely when no cluster is detected — do not write "no cluster found."}
 
 ### Zones
 
@@ -201,11 +254,11 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 
 Optional note below table: "Zones overlap at X — X" (cross-timeframe stack).
 
-**Note column is mandatory.** Every zone must be flagged as `fresh` or `wick-tested (X)` per step 2 of the workflow. FVG overlap and cross-timeframe stack go here too. **FVG references in the Note column must carry direction:** `bullish FVG below at X — Y` or `bearish FVG above at X — Y`. A bare "FVG" reference fails review.
+**Note column is mandatory.** Every zone must be flagged as `fresh` or `wick-tested (X)` per Stage 2.4 of the workflow. FVG overlap and cross-timeframe stack go here too. **FVG references in the Note column must carry direction:** `bullish FVG below at X — Y` or `bearish FVG above at X — Y`. A bare "FVG" reference fails review.
 
 ### Liquidity
 
-Every level cited must carry `(taken)` or `(alive)` per step 2 of the workflow. A level without a status marker fails the mandatory sweep check. Use only `(taken)` or `(alive)`; do not stack qualifiers like `(taken overnight, spent)` — the word "spent" belongs in the Liquidity map prose, not the data list.
+Every level cited must carry `(taken)` or `(alive)` per Stage 2.4 of the workflow. A level without a status marker fails the mandatory sweep check. Use only `(taken)` or `(alive)`; do not stack qualifiers like `(taken overnight, spent)` — the word "spent" belongs in the Liquidity map prose, not the data list.
 
 Structure each side as a **magnet line** plus a **supporting line**:
 
@@ -246,7 +299,7 @@ If both extremes are taken and there is no clean magnet, write `**Magnet:** none
 
 ### Liquidity map (per symbol)
 
-One sentence, plain English, no jargon-stacking. Built from step 2's outputs (taken vs. alive labels) and the 4h trend. The job: tell the reader, in the language a smart trader would use over coffee, *which magnet is still pulling price today and which one is already spent*. Two anchors:
+One sentence, plain English, no jargon-stacking. Built from Stage 2.4's outputs (taken vs. alive labels) and the 4h trend. The job: tell the reader, in the language a smart trader would use over coffee, *which magnet is still pulling price today and which one is already spent*. Two anchors:
 
 - **Where the unfinished business is** — the still-untouched PDH or PDL (or PWH/PWL if the daily extreme is already gone). Call it "the magnet" or "the unfinished business," not "the liquidity pool."
 - **Whether the magnet is a reversal point or a continuation point** — driven by the 4h trend. Up trend + price reaching down = pullback buy; up trend + price reaching up = continuation; flip for down trend.
@@ -305,10 +358,13 @@ If the numbers and the phase contradict (e.g. labeling phase = Indication while 
 
 ### Context budget
 
-- Each symbol section: ~1,000–1,500 bytes. The newsletter is the deliverable, not raw telemetry.
+- **Stage 1:** ≤ 4 tool calls per symbol (chart_set_symbol, chart_set_timeframe, two parallel data pulls). Default 4 symbols → ≤ 16 calls total.
+- **Stage 2:** ≤ 6 tool calls per candidate (15m structure + OHLCV, FVG verbose, 4h history, plus the timeframe switches). Most days 1–2 candidates → ≤ 12 calls total.
+- **Total budget target:** ≤ 28 calls on a typical run. Compare to pre-staging baseline of ~40 calls per run.
+- Each Stage 2 per-symbol section: ~1,000–1,500 bytes. The newsletter is the deliverable, not raw telemetry.
 - Never dump raw tool JSON. Summarize into the tables and prose above.
 - No screenshots unless the user asks.
-- If a symbol has no unmitigated zones within the search window in either direction, give it a one-line "No actionable setup" note and move on. Do not invent zones.
+- Skipped Stage 1 symbols get a one-line Board entry (grade D/F + skip reason) and no per-symbol section. Do not invent zones.
 
 ## Rules (no exceptions)
 
@@ -319,4 +375,5 @@ If the numbers and the phase contradict (e.g. labeling phase = Indication while 
 5. If 4h/15m is unclear (both consolidating, or conflicting trends with no same-direction confluence), ask before falling back to 1h/5m.
 6. Do not import vocabulary from other strategies. No "bias," "PD Array," "indication," "correction," etc.
 7. Tighter zones beat wider zones — always note size in the report.
-8. **MANDATORY session-sweep check (step 2).** Before publishing, pull 60-bar 15m OHLCV and cross-check every cited label, zone SL, and 3R target against session high/low. Mark every label `(taken)` or `(alive)`. Mark every zone `fresh` or `wick-tested`. If a 3R target has already been traded through this session, the trade is not live — downgrade or pass. A report missing these markers is data-incorrect. Skipping this check has cost real money (see `feedback_verify_swept_levels.md` in memory).
+8. **MANDATORY session-sweep check (Stage 2.4).** Before publishing, pull 60-bar 15m OHLCV and cross-check every cited label, zone SL, and 3R target against session high/low. Mark every label `(taken)` or `(alive)`. Mark every zone `fresh` or `wick-tested`. If a 3R target has already been traded through this session, the trade is not live — downgrade or pass. A report missing these markers is data-incorrect. Skipping this check has cost real money (see `feedback_verify_swept_levels.md` in memory).
+9. **Stage 1 triage is mandatory.** Do not pull FVG verbose color decode, 4h history (`include_mitigated: true`), or 15m OHLCV on a symbol that hasn't passed the Qualify rules. The whole point of staging is to avoid paying for those on symbols that have no actionable setup. If a Stage 1 verdict feels wrong, refine the rules — don't bypass them.
