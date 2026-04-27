@@ -17,8 +17,8 @@ Trade construction (entry, structural protection, R-multiples, grade, Call) is t
 
 ## Vocabulary
 
-- **Trend:** Up / Down / Consolidating per timeframe.
-- **Phase (4h ICC):** Indication / Correction / Continuation / No Trade. Classified from the snapshot's ind / TP / inv values + current price.
+- **Trend:** Up / Down / Consolidating per timeframe. Derived from market structure (HH/HL for Up, LH/LL for Down) — *not* from ICC events.
+- **Phase (4h ICC) — reference only:** Indication / Correction / Continuation / No Trade. Classified from the snapshot's ind / TP / inv values + current price. Output on the 4h trend line for the reader. **Never used as a Call driver, grade input, tiebreaker, or confluence factor.** S&D structure (zones + FVGs + alive key levels + market structure) is what drives the read.
 - **Magnet:** the single alive level per side that price is reaching for. One per side. No "the bigger pull / the smaller pull"; no compound terms.
 - **Confluence:** unmitigated zone + same-direction FVG + alive key level inside a tight band. Untouched same-direction FVG is a bonus flag.
 - **Cluster:** all three confluence factors stacked tight in the same direction. Rare. High-probability reversal signal.
@@ -36,7 +36,7 @@ Before reading any snapshot:
 
 1. For each symbol, find the most recent snapshot file under `analysis/data/`. If no snapshot exists for a default symbol, prompt: *"No chart-data snapshot found for {SYMBOL}. Run chart-data first."* — do not proceed for that symbol.
 2. Compute snapshot age = current time − snapshot timestamp.
-3. If age > 15 minutes, prompt: *"Snapshot for {SYMBOL} is {N} minutes old. Refresh chart-data?"* — do not proceed without explicit user direction.
+3. If age > 60 minutes, prompt: *"Snapshot for {SYMBOL} is {N} minutes old. Refresh chart-data?"* — do not proceed without explicit user direction.
 4. If the snapshot has any failed-gate notes, surface them to the user and pause for direction before using that symbol.
 
 ## Workflow
@@ -58,26 +58,30 @@ Skipped symbols carry to the Board with a one-line skip reason. Candidates proce
 
 For each candidate, answer in this order:
 
-#### 2.1 Trend (per TF)
+#### 2.1 Trend (per TF) — drives the read
 
-Use the snapshot's ICC structural levels and any cycle context:
+Derive trend strictly from S&D market structure on the snapshot:
 
-- **Up:** consecutive bullish BOS/ChoCh; price making HH + HL.
-- **Down:** consecutive bearish BOS/ChoCh; price making LH + LL.
-- **Consolidating:** alternating events within a tight range; no net new HH or LL.
+- **Up:** consecutive bullish BOS/ChoCh; HH + HL; the most recent unmitigated zone is demand below price.
+- **Down:** consecutive bearish BOS/ChoCh; LH + LL; the most recent unmitigated zone is supply above price.
+- **Consolidating:** alternating BOS/ChoCh inside a tight range; zones on both sides of price; no net new HH or LL.
+
+Market structure (BOS/ChoCh, swing pivots, zone direction) is valid evidence. ICC *phase* (Indication / Correction / Continuation) is **not** valid trend or bias evidence — keep it confined to the reference output in Stage 2.2.
 
 If 4h is consolidating across all candidates, ask: *"4h is consolidating across candidates — drop to 1h instead?"*
 
-#### 2.2 Phase classification (4h)
+#### 2.2 ICC phase (4h) — reference only, not a driver
 
-From the snapshot's ind / TP / inv + current price:
+ICC levels and phase are output on the 4h trend line for the reader. They have **zero bearing** on the Call, the grade, or directional bias. Do not use them as a tiebreaker, a confluence factor, or to justify the read in The Read / Liquidity map / Grade rationale.
+
+From the snapshot's ind / TP / inv + current price, classify the 4h phase for the reference label:
 
 - **Indication** — price near working extreme; TP "forming" in the snapshot.
 - **Correction** — price has pulled back from TP toward (or past) ind; TP is a numeric pivot in the snapshot.
 - **Continuation** — price has reclaimed ind heading back toward TP; TP is a numeric pivot.
 - **No Trade** — 4h is choppy; do not list ICC levels in the trend label.
 
-**Phase consistency check (mandatory).** If the snapshot's TP is "forming" and you classify Correction or Continuation, stop — the snapshot is internally inconsistent or your phase pick is wrong. Re-derive the phase from the level math, or surface the data inconsistency to the user.
+**Phase consistency check (mandatory).** If the snapshot's TP is "forming" and you classify Correction or Continuation, stop — the snapshot is internally inconsistent or your phase pick is wrong. Re-derive the phase from the level math, or surface the data inconsistency to the user. (Phase still has zero bearing on the Call — this check is a data-integrity gate, not an analytical step.)
 
 #### 2.3 Magnet identification
 
@@ -153,10 +157,8 @@ Save to `analysis/YYYY-MM-DD-HHMMET.md` (24-hour, ET suffix).
 ## {TICKER} — {Description} · {price} · Grade {X}
 
 **Trend:** 4h {Up/Down/Consolidating} ({phase} · ind {price} · TP {price or "forming"} · inv {price}) · 15m {Up/Down/Consolidating}
-**Call:** **{GO LONG / GO SHORT / WATCH / PASS}** — {one-line verdict}
-**Grade rationale:** {one sentence — comma-separated layers that aligned, plus one because-clause if held back from a higher grade}
-
-**Liquidity map:** {one plain-English sentence — which magnet is alive, which is spent, where the day wants to go. Run it past the vocabulary check below.}
+**Call:** **{GO LONG / GO SHORT / WATCH / PASS}** — {one complete-sentence verdict; no hedges}
+**Grade rationale:** {one or two complete sentences citing specific S&D layers that contributed (zones, FVG overlap, alive magnets, cross-timeframe stack) and the factor that held the grade back, if any. No ICC vocabulary.}
 
 **Cluster:** {OPTIONAL — only when all three factors stack tight per Stage 2.4. Format: list zone, untouched same-direction FVG, alive key level with prices, state band width, end with "high-probability reversal." Omit entirely when no cluster.}
 
@@ -164,7 +166,7 @@ Save to `analysis/YYYY-MM-DD-HHMMET.md` (24-hour, ET suffix).
 
 | TF  | Type           | Range       | Size    | Note                                          |
 |-----|----------------|-------------|---------|-----------------------------------------------|
-| 15m | Demand/Supply  | low — high  | X pts   | FVG overlap / cross-TF stack                  |
+| 15m | Demand/Supply  | low — high  | X pts   | {confluence note — FVG overlap with prices and direction, alive level inside zone, cross-TF stack}                |
 | 4h  | Demand/Supply  | low — high  | X pts   | …                                             |
 
 Optional note below table: "Zones overlap at X — X" (cross-timeframe stack).
@@ -173,31 +175,40 @@ FVG references in Note column must carry direction: `bullish FVG below at X — 
 
 ### Liquidity
 
-- **Magnet above:** {single bolded alive level the day is reaching for, with one-clause reason}
-- **Above (other levels):** PDH X (taken/alive) · PWH X (taken/alive) · …
-- **Magnet below:** {single bolded alive level downside, with one-clause reason}
-- **Below (other levels):** Day Open X (taken/alive) · PDL X (taken/alive) · …
+{Lead paragraph — one or two complete sentences describing the directional pull for the session, anchored in S&D layers (which zone is controlling, which magnet the session is reaching for, which side is spent). AP Style. Active voice. No ICC vocabulary.}
 
-If both extremes taken, write `**Magnet:** none — both sides spent` and skip the magnet split.
+- **Magnet above:** {price} (alive) — {standardized fragment naming the role: e.g., "first natural rejection inside the 4h supply"; "the deep-high magnet"; "first overhead target above the zone"}
+- **Other above:** {price} ({alive/taken/distant}) · {price} ({status}) · …
+- **Magnet below:** {price} (alive) — {standardized fragment naming the role}
+- **Other below:** {price} ({status}) · {price} ({status}) · …
+- **Watch for:** {one or two complete sentences describing the specific session-level signal that activates the trade and the level or behavior that disproves the read. AP Style.}
+
+If both extremes are taken, write `**Magnet:** none — both sides spent` and skip the magnet split. The "Watch for" bullet is mandatory on every candidate.
 
 ### The Trade
 
-- **Entry:** X — {zone reference}
+- **Entry:** X — {zone reference, fragment OK}
 - **Stop:** X — {invalidation, structural protection edge of the zone}
 - **Target:** X — {nearest alive magnet inside entry→3R range, or the 3R figure if none}
 - **3R reference:** X (only when Target ≠ 3R; omit when they agree to within a tick)
-- **Risk / Reward:** X pts / X pts
-- **Runner target (optional):** X — {next alive magnet beyond Target}
-- **Confluence:** {bullish/bearish FVG with direction · cross-TF stack · untouched flag · hazard FVGs if any}
+- **Risk / Reward:** X pts / X pts (≈ XR)
+- **Runner target:** X — {next alive magnet beyond Target} (omit if no runner)
+- **Confluence:** {one complete sentence naming the same-direction FVG with prices and direction, alive key levels inside or adjacent to the zone, and cross-timeframe stack if present. No ICC vocabulary.}
+- **Hazards:** {one complete sentence naming wrong-direction FVGs between entry and target with prices and count, or "None — clean path." No ICC vocabulary.}
 
 ### The Read
 
-{Exactly two sentences. Sentence 1: the structural reason this setup works. Sentence 2: the condition that kills it. No restating Liquidity map, Grade rationale, or The Trade content. No hedges.}
+{Three or four complete sentences walking the reader through the setup. AP Style. Active voice. No ICC vocabulary. No restating the Grade rationale or The Trade content verbatim.
+
+Sentence 1 — structural framing: where price sits relative to the controlling zone and what the recent S&D structure shows.
+Sentence 2 — confluence: the same-direction FVG overlap, alive key levels inside or adjacent to the zone, and any cross-timeframe stack.
+Sentence 3 — trigger: the specific session-level signal that activates the trade.
+Sentence 4 — invalidation: the level or behavior that disproves the read.}
 ```
 
-## Liquidity map vocabulary check (mandatory)
+## Liquidity vocabulary check (mandatory)
 
-Run every Liquidity map sentence past this. If any banned phrase appears, rewrite.
+Run every Liquidity lead-paragraph and Watch-for sentence past this. If any banned phrase appears, rewrite.
 
 **Banned:**
 - "liquidity pool" → "the magnet"
@@ -211,15 +222,32 @@ Run every Liquidity map sentence past this. If any banned phrase appears, rewrit
 - "where price wants to go" → "wants to reach for X"
 - Any made-up compound term ("downside-magnet-cluster," etc.) → don't.
 
-**Approved:**
-- For the live level: "the magnet," "the unfinished business," "still untouched," "still alive."
-- For the dead level: "already grabbed," "already swept," "spent."
+**ICC vocabulary banned in analytical prose** (Top Call thesis, Grade rationale, Liquidity lead, Watch for, The Trade Confluence/Hazards, The Read, Bottom Line). The 4h Trend line and the per-symbol header are the only places ICC may appear:
+- "Indication phase" / "Correction phase" / "Continuation phase" → omit; cite the zone, FVG, and market-structure evidence instead.
+- "ind" / "TP" / "inv" / "structural break point" / "broken pivot" → omit in prose; cite the zone edges and key-level prices instead.
+- "bear cycle" / "bull cycle" / "ICC cycle" / "cycle direction" → "4h Down" / "4h Up" / "lower highs and lower lows" / "higher highs and higher lows."
+- "retracing toward ind" / "retesting the broken pivot" → "retesting the unmitigated 4h supply" / "retesting the unmitigated 4h demand."
+
+**Approved standardized vocabulary** — pick from this list and stick to it for predictability:
+- For zones: "the unmitigated 4h supply at X — Y" / "the unmitigated 15m demand at X — Y" / "the controlling zone."
+- For zone interactions: "wicks into," "rejects," "fails to hold," "reclaims," "mitigates," "respects."
+- For FVGs: "bearish 4h FVG inside the zone at X — Y" / "bullish 15m FVG overlapping at X — Y." Direction tag mandatory.
+- For levels: "PDH X (alive)," "PWH X (taken)," "the magnet at X," "still alive," "spent," "already grabbed," "already swept."
 - For directional read: "wants to reach for," "wants to grab," "keeps going past it," "reverses off it."
+- For trend: "lower highs and lower lows," "higher highs and higher lows," "alternating swings inside a tight range."
+- For magnet roles in the bullet fragments: "first natural rejection inside the zone," "the deep-low magnet," "the deep-high magnet," "first overhead target," "first downside target."
+
+**Style enforcement (mandatory):**
+- Prose lines (Top Call thesis, Grade rationale, Liquidity lead, Watch for, Confluence, Hazards, The Read, Bottom Line) must be complete sentences, AP Style, active voice.
+- Bullets in Liquidity, Trade, and Board may be fragments, but must use parallel structure within a list.
+- Every cited level must carry its alive/taken status on first reference per per-symbol section.
+- Spell out abbreviations (PDH, PDL, PWH, PWL, PMH, PML, MO, DO, WO, PD-EQ, PW-EQ, PM-EQ, FVG) on first use per per-symbol section, then abbreviate.
 
 **Self-check before publishing:**
-1. Read each Liquidity map sentence aloud once. If any banned phrase, rewrite.
+1. Read each prose sentence aloud once. If any banned phrase or fragment masquerading as a sentence, rewrite.
 2. Confirm only one magnet per side.
-3. Confirm directional read is tied to 4h trend.
+3. Confirm directional read is tied to 4h trend evidence (zones + market structure), not to ICC phase language.
+4. Confirm no ICC vocabulary appears outside the Trend line.
 
 ## AP style enforcement
 
@@ -241,6 +269,8 @@ Run every Liquidity map sentence past this. If any banned phrase appears, rewrit
 3. **Trust the snapshot's ICC ind/TP/inv.** Phase classification is yours; the underlying levels are not.
 
 4. **Phase ↔ TP consistency is non-negotiable.** Correction and Continuation require numeric TP from the snapshot. If the snapshot says "TP forming," the only valid phases are Indication or No Trade.
+
+4a. **ICC is reference-only — never a driver.** ICC phase, ind, TP, and inv appear on the 4h trend line for the reader. They are forbidden as inputs to the Call, the grade, the magnet pick, the cluster check, the trade construction, or any directional read. The Grade rationale and The Read must justify the setup from S&D layers (market structure, zones, FVGs, alive key levels) only. If you find yourself writing "bear-cycle Correction tips the read short" — rewrite to cite the unmitigated supply zone, the bearish FVG, the alive downside magnet instead. Per `feedback_icc_levels_mandatory_in_snd` and `feedback_snd_strategy_purity` memories.
 
 5. **Every cited number must trace to the snapshot.** If you write "PDH 76.67 (alive)" in the playbook, that exact value with that exact status must appear in the snapshot.
 
