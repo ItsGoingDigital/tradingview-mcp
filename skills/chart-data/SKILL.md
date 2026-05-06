@@ -75,6 +75,7 @@ Run as silent preconditions. A failed gate either retries, falls back to the OHL
    - **ind** = the broken pivot price of the most recent cycle-defining event. For a bear cycle with a recent bear BOS at `entry = X`, `ind = X`.
    - **inv** = the dashed-pivot (paired) price of the BOS/ChoCh one back from the most recent in the same cycle direction. Do not pluck inv from older same-direction events that have been superseded by the current cycle.
    - **TP** = the leg extreme after ind broke. Pull ~15 bars of 4h OHLCV after the ind-break bar; the lowest low (bear) or highest high (bull) is the candidate. If the candidate has at least 5 bars on each side without violating it, it has crystallized as a pivot — use the numeric value. If not, use `forming` and record the working extreme separately.
+   - **Backstop:** Step 6 in the per-symbol pass widens the zone-pull window when the initial cap returns no anchor. Use that wider pull here. Only mark a level "undetermined" if the widened pull still returns no qualifying event — and document the reason in the Notes section ("zero unmit 4h zones in entire history; structure spent" or "one-back same-direction event superseded by intervening cycle").
 
 ## Workflow per symbol
 
@@ -92,7 +93,7 @@ Budget: ≤ 14 MCP calls per symbol on a typical run. The verification gates may
 3. Pull `data_get_pine_labels` (study_filter: "ICT Killzones") — first pull
 4. Sleep 2s
 5. Pull `data_get_pine_labels` again — verify match (Gate 1)
-6. Pull `data_get_structure_zones` (study_filter: "Market Structure", `within_points` per symbol cap, `include_mitigated: true`) — for ICC derivation and to anchor unmitigated 4h zones
+6. Pull `data_get_structure_zones` (study_filter: "Market Structure", `within_points` per symbol cap, `include_mitigated: true`) — for ICC derivation and to anchor unmitigated 4h zones. **ICC anchor backstop:** if the response shows `unmitigated_count >= 1` but no unmit zone falls inside the `within_points` window, OR `unmitigated_count == 0` but historical events exist that could anchor `inv` (most recent in-direction event one back), re-pull with `within_points` doubled (then quadrupled) up to 2 retries before giving up. The goal is to guarantee `ind`, `TP`, and `inv` can be derived in Gate 8 — partial ICC anchoring is the most common cause of "undetermined" values in the snapshot output.
 7. Pull `data_get_pine_boxes` (study_filter: "FVG", `verbose: true`) — 4h FVGs
 8. Pull `data_get_ohlcv` (count: 15, summary: false) — 4h bars for ICC TP pivot detection
 9. `chart_set_timeframe 15` → sleep 2s

@@ -30,6 +30,10 @@ Trade construction (entry, structural protection, R-multiples, grade, Call) is t
 - Latest `chart-data` snapshot per symbol from `analysis/data/`. Filename pattern: `YYYY-MM-DD-HHMMET-{SYMBOL}.md`.
 - Default symbols (unless user overrides): MNQ, MES, MGC, SIL.
 
+## Arguments
+
+- **`appendix`** (boolean, default `false`) — when invoked with `appendix=true`, `--appendix`, or simply `appendix`, append a per-symbol ICC Appendix to the playbook. Reference output only; never affects Call, Grade, magnet pick, or any analytical decision. See Stage 6 below.
+
 ## Freshness gate (mandatory)
 
 Before reading any snapshot:
@@ -49,10 +53,10 @@ For each default symbol:
 2. Apply triage rules (cheap, no analysis depth):
    - **Zone present?** At least one unmitigated zone within range in the snapshot.
    - **Aligned magnet alive?** For supply (short setup), at least one alive key level below price within roughly 3R of the zone's lower edge. For demand (long setup), an alive key level above price within 3R of the upper edge. (3R math is computed in Stage 2; for triage, use the zone size × 3 as a coarse range.)
-   - **Daily-extreme sanity.** If the only overhead magnets in a long's path are PDH and PWH and both are taken, skip with verdict "both extremes spent." Mirror for shorts.
-3. Build the triage table (Symbol, Price, Zone summary, Aligned magnet, Verdict). Verdicts: `CANDIDATE`, `SKIP — no zone in range`, `SKIP — both extremes spent`, `SKIP — no aligned magnet alive`.
+   - **Daily-extreme sanity.** If the only overhead magnets in a long's path are PDH and PWH and both are taken, *do not skip outright* — flag the symbol as `EXTENDED` and route to break-and-go evaluation (Stage 3.5). Mirror for shorts. Skip only if break-and-go also has no clean structural anchor.
+3. Build the triage table (Symbol, Price, Zone summary, Aligned magnet, Verdict). Verdicts: `CANDIDATE` (retest path viable), `EXTENDED` (overhead/underside spent → break-and-go evaluation), `SKIP — no zone in range`, `SKIP — no structural anchor`.
 
-Skipped symbols carry to the Board with a one-line skip reason. Candidates proceed to Stage 2.
+`CANDIDATE` and `EXTENDED` symbols both proceed to Stage 2. Skips carry to the Board with a one-line reason.
 
 ### Stage 2 — three-question pass per candidate
 
@@ -110,33 +114,62 @@ For each unmitigated zone in the snapshot:
 
 If a cluster is detected, note it for the per-symbol section and bump grade one notch (capped at A+).
 
-### Stage 3 — trade construction
+### Stage 3 — trade construction (retest path)
 
-For each candidate's chosen zone (if a tradeable setup exists):
+For each `CANDIDATE` symbol's chosen zone (if a tradeable retest exists):
 
 1. **Pick the entry edge.** For shorts: lower zone edge. For longs: upper zone edge. The opposite edge is structural protection.
 2. **Compute risk and 3R.** `risk = |edge_upper − edge_lower|`. For shorts, `tp_3R = entry − 3 × risk`. For longs, `entry + 3 × risk`.
 3. **3R-already-traded check.** Compare `tp_3R` to the snapshot's session high/low:
-   - Short with `session_low ≤ tp_3R` → move already delivered → downgrade hard (D/F) or pass.
-   - Long with `session_high ≥ tp_3R` → same. Do not pitch a TP the session has already traded through.
+   - Short with `session_low ≤ tp_3R` → move already delivered → consider Stage 3.5 (break-and-go) instead of pitching a spent retest.
+   - Long with `session_high ≥ tp_3R` → same. Do not pitch a TP the session has already traded through; route to Stage 3.5.
 4. **Magnet-overrides-3R.** Scan the entry-to-3R range for alive key levels. The nearest alive level inside the range is the realistic Target; keep the 3R figure as math reference only (omit the line if Target == 3R). If none inside the range, Target = 3R.
 5. **Runner.** The next alive magnet beyond Target.
 6. **Hazard scan.** Wrong-direction FVGs between entry and Target → list as hazards in The Trade Confluence line.
 7. **Cross-TF stack.** A 4h zone overlapping a 15m zone in the same direction is a stack — note it.
 
+### Stage 3.5 — trade construction (break-and-go path)
+
+Use this path for `EXTENDED` symbols *and* for `CANDIDATE` symbols where Stage 3 step 3 (3R-already-traded) ruled out the retest. The premise: when momentum has carried price past the structural retest entry, a confirmation-on-break entry is the only realistic way to participate in continuation. This path is paired with the retest path, not a replacement — when both are viable, present both and let R/R decide the Top Call.
+
+**Trigger conditions (all must hold):**
+
+- 4h trend is `Up` or `Down` per Stage 2.1 (not `Consolidating` — break-and-go from chop is a fade, not a trend trade).
+- The most recent 4h or 15m unmitigated zone is in the trend direction (bull demand below for longs; bear supply above for shorts) — confirms structure has not flipped.
+- Session_high (long) or session_low (short) sits within 25% of zone size from current price — i.e., price is hovering near the breakout pivot, not 3R-extended already.
+- A deeper alive magnet exists in the trend direction (PMH, PWH, or 4h FVG cluster for longs; PML, PWL for shorts). Without one, break-and-go has no target — skip.
+
+**Construction:**
+
+1. **Entry trigger.** 15-minute close beyond the breakout pivot:
+   - Long: 15m close above session_high (or above the most recent 15m swing high if intraday already broke session_high).
+   - Short: 15m close below session_low (or most recent 15m swing low).
+2. **Entry price.** Mid-bar of the confirming 15-minute bar, or the breakout pivot itself for limit orders.
+3. **Stop.** The most recent 15-minute swing low (long) or swing high (short) — *not* the 4h zone opposite edge. The 4h zone is too far away in an extended condition; using it as a stop blows up the R/R.
+4. **Target.** First alive deep magnet in the trend direction. Examples: long → PMH, then PWH; short → PML, then PWL. Never invent a target — must be a snapshot-listed alive level.
+5. **R/R math.** `risk = |entry − stop|`, `reward = |target − entry|`. Compute R/R; if reward < 1.5R, downgrade or skip — break-and-go demands at least 1.5R because the stop is a market-structure level, not a structural zone.
+6. **Hazard scan.** Wrong-direction FVGs between entry and target are still hazards. Note count and location.
+7. **No cross-TF stack.** Break-and-go entries do not get a cross-TF stack note — the entry is at a market-structure level, not a zone overlap. Stack notes belong only to retest entries.
+
+**Why this is structurally weaker than retest:** the stop is at the most recent swing, which can be tagged on routine pullbacks. The retest path uses zone edges, which carry institutional weight. Cap break-and-go grade at B (B+ if there's a cluster of alive deep magnets stacked tight, but never A).
+
 ### Stage 4 — grade & Call
 
 Apply the grading rubric:
 
-- **A** — every layer aligns: trend, cross-TF stack, tight size, alive magnet, fresh setup. Full size.
-- **B** — strong setup missing one confluence. Standard size.
-- **C** — tradeable with a known risk (counter-trend, no stack, wide zone). Reduce size or shorten hold.
+- **A** — every layer aligns: trend, cross-TF stack, tight size, alive magnet, fresh setup. Full size. *Retest path only.*
+- **B** — strong setup missing one confluence. Standard size. *Either path; break-and-go caps here unless a deep-magnet cluster lifts to B+.*
+- **C** — tradeable with a known risk (counter-trend, no stack, wide zone, or break-and-go with marginal R/R). Reduce size or shorten hold.
 - **D** — valid structure, thesis has a gap (usually missing magnet). Watch only.
 - **F** — pass.
 
-Use `+` / `-` modifiers for exceptional features. Cluster bumps grade one notch (capped at A+).
+Use `+` / `-` modifiers for exceptional features. Cluster bumps grade one notch (capped at A+ for retest, B+ for break-and-go).
 
-Call: GO LONG / GO SHORT / WATCH / PASS based on grade and trend alignment.
+**Path-specific grading:**
+- *Retest path:* normal rubric. Cluster, cross-TF stack, and structural-zone stop are eligible for A grades.
+- *Break-and-go path:* maximum B+. The stop sits at a 15-minute swing rather than a structural zone, so the setup carries timing risk that retests do not. Even with a deep alive magnet and trend-aligned structure, the path-specific cap holds.
+
+Call: GO LONG / GO SHORT / WATCH / PASS based on grade and trend alignment. When both retest and break-and-go are viable for the same symbol and direction, present both with the better R/R as primary and the other as alternate in The Trade section.
 
 ### Stage 5 — compose the playbook
 
@@ -150,6 +183,7 @@ Save to `analysis/YYYY-MM-DD-HHMMET.md` (24-hour, ET suffix).
 4. **The Board** — 7-col summary: Symbol · Grade · Call · Entry · Stop · Target · Risk. One row per default symbol including skips. Top pick bolded.
 5. **Per-symbol sections** — only for Stage 2 candidates. Skips do not get a per-symbol section.
 6. **Bottom Line** — decisive recap: swing + grade, tacticals + grades, skips + grades + reasons.
+7. **Appendix — ICC Reference** — only when `appendix=true`. See Stage 6.
 
 ### Per-symbol section template
 
@@ -181,20 +215,23 @@ FVG references in Note column must carry direction: `bullish FVG below at X — 
 - **Other above:** {price} ({alive/taken/distant}) · {price} ({status}) · …
 - **Magnet below:** {price} (alive) — {standardized fragment naming the role}
 - **Other below:** {price} ({status}) · {price} ({status}) · …
-- **Watch for:** {one or two complete sentences describing the specific session-level signal that activates the trade and the level or behavior that disproves the read. AP Style.}
+- **Watch for:** {one or two complete sentences describing the specific session-level signal that activates the trade and the level or behavior that disproves the read. For break-and-go entries, the activating signal is "a 15-minute close above/below {breakout level}." For retest entries, it is "a 15-minute rejection wick into {zone} with a close back through {edge}." AP Style.}
 
 If both extremes are taken, write `**Magnet:** none — both sides spent` and skip the magnet split. The "Watch for" bullet is mandatory on every candidate.
 
 ### The Trade
 
-- **Entry:** X — {zone reference, fragment OK}
-- **Stop:** X — {invalidation, structural protection edge of the zone}
-- **Target:** X — {nearest alive magnet inside entry→3R range, or the 3R figure if none}
-- **3R reference:** X (only when Target ≠ 3R; omit when they agree to within a tick)
+- **Entry mode:** {Retest / Break-and-go / Retest primary + Break-and-go alternate}
+- **Entry:** X — {zone reference for retest; "15m close beyond {breakout level}" for break-and-go}
+- **Stop:** X — {opposite zone edge for retest; most recent 15m swing low/high for break-and-go}
+- **Target:** X — {nearest alive magnet inside entry→3R range for retest; first alive deep magnet in trend direction for break-and-go}
+- **3R reference:** X (retest only; omit for break-and-go since stop is market-structure-anchored)
 - **Risk / Reward:** X pts / X pts (≈ XR)
 - **Runner target:** X — {next alive magnet beyond Target} (omit if no runner)
 - **Confluence:** {one complete sentence naming the same-direction FVG with prices and direction, alive key levels inside or adjacent to the zone, and cross-timeframe stack if present. No ICC vocabulary.}
 - **Hazards:** {one complete sentence naming wrong-direction FVGs between entry and target with prices and count, or "None — clean path." No ICC vocabulary.}
+
+**When both paths are viable**, append an `### Alternate trade` block under The Trade with the same structure for the secondary path.
 
 ### The Read
 
@@ -205,6 +242,68 @@ Sentence 2 — confluence: the same-direction FVG overlap, alive key levels insi
 Sentence 3 — trigger: the specific session-level signal that activates the trade.
 Sentence 4 — invalidation: the level or behavior that disproves the read.}
 ```
+
+### Stage 6 — ICC Appendix (optional, reference-only)
+
+**Trigger:** only when invoked with `appendix=true`. If the flag is not set, skip this stage entirely — the playbook ends after Bottom Line.
+
+**Hard rule:** the Appendix is a reference snapshot for the reader. It must not influence the Top Call, Grade, magnet pick, or any analytical decision in Stages 1–5. If the Appendix changes the playbook's body, the skill ran wrong. Re-derive the body from S&D layers and put cycle context here only.
+
+**Scope:** include every default symbol (MNQ, MES, MGC, SIL by default), even those that triage skipped or have partial / undetermined ICC values. Skipped symbols still get an Appendix entry — the Appendix is a *reference*, not gated on tradeability.
+
+**Source of truth:** the snapshot's `## ICC structural levels (4h)` section. Read `ind`, `TP`, `inv`, and any working-extreme notes verbatim. Never re-derive levels here — the snapshot already did the math under the verified session window. If the snapshot says "undetermined this run," the Appendix entry says "undetermined" with a one-line note explaining why (typically: zone-pull window too narrow, no unmit zone in history, etc.).
+
+**Phase classification (re-derived for the Appendix only, never copied to the per-symbol Trend line):**
+
+- **Indication** — TP is "forming" in the snapshot; price sits in the impulse leg without a crystallized leg-extreme pivot. Working extreme is the candidate TP.
+- **Correction** — TP is a numeric pivot; price has pulled back from TP toward (or past) ind. Trade frame is "retrace inside the cycle."
+- **Continuation** — TP is a numeric pivot; price has reclaimed ind in the cycle direction and is heading back toward (or past) TP.
+- **No Trade** — 4h is choppy, structure is unclear, or all three ICC levels are undetermined. List levels that exist; omit the rest.
+
+Phase consistency check applies (Stage 2.2): Correction or Continuation require a numeric TP. If TP is "forming," the only valid Appendix phase labels are Indication or No Trade.
+
+**Appendix structure:**
+
+```
+## Appendix — ICC Reference (4h)
+
+> Reference output. ICC phase, ind, TP, and invalidation are read from the chart-data snapshot for context only. They do not influence the Top Call, Grade, magnet pick, or any analytical decision in this playbook.
+
+### {TICKER} — {phase}
+
+- **ind:** {price} — {one-line: which event broke this pivot, e.g., "broken pivot of bear ChoCh at bar_idx 1304" copied from snapshot}
+- **TP:** {price or "forming"} — {one-line: leg extreme description; if "forming," include working-extreme value and the bar that printed it}
+- **inv:** {price or "undetermined"} — {one-line: paired pivot of the BOS/ChoCh one back from the most recent in the same cycle direction}
+- **Cycle direction:** {bull / bear / undetermined}
+- **Phase reasoning:** {one or two sentences: cite the snapshot-level facts that yielded the phase pick — TP forming → Indication; TP numeric + price below ind in bear cycle → Correction; etc. No prose about "what the phase means for the trade." Keep it descriptive, not directive.}
+
+**Correction levels addendum** — only when phase = Correction (mandatory per `feedback_correction_addendum_mandatory` memory).
+
+The leg from {paired-pivot prior to TP} to TP spans {N} points. Reference fibs across the full leg:
+
+- 38.2%: {price}
+- 50.0%: {price}
+- 61.8%: {price}
+- 78.6%: {price}
+
+{One-sentence factual note: where current price sits in the fib stack. No directional language.}
+```
+
+**Per-phase output rules:**
+
+- **Indication:** show ind, TP forming with working extreme, inv (or "undetermined"). No Correction addendum.
+- **Correction:** show ind, TP (numeric), inv. Include Correction levels addendum with full-leg fibs (per `feedback_fib_full_leg`: leg = swing low → swing high, not indication-to-TP).
+- **Continuation:** show ind, TP (numeric), inv. Note where current price sits relative to ind and TP. No Correction addendum.
+- **No Trade:** state phase = No Trade and list whatever levels exist. Skip phase reasoning if all three are undetermined; just say "structure has not yet established a fresh anchor; await new BOS or ChoCh."
+
+**Vocabulary in the Appendix:** ICC vocabulary is permitted here (and only here, plus the per-symbol Trend line) — "Indication," "Correction," "Continuation," "ind," "TP," "inv," "bull cycle," "bear cycle," "leg," "broken pivot," "paired pivot." Stay descriptive. Do not write "the Correction phase suggests longs back from ind" — that's directive language and belongs nowhere in the playbook.
+
+**Verification before publishing:**
+
+1. Confirm the body of the playbook (Stages 1–5) does not reference the Appendix.
+2. Confirm every Appendix value traces to the snapshot's `## ICC structural levels (4h)` section verbatim.
+3. Confirm Correction phase entries carry the levels addendum.
+4. Confirm No Trade entries do not invent phases or levels — they describe absence.
 
 ## Liquidity vocabulary check (mandatory)
 

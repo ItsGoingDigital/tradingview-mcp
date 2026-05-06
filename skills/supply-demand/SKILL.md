@@ -92,9 +92,23 @@ Budget: ≤ 6 tool calls per candidate. Skip the symbol if a step would push pas
 
 3. `data_get_pine_boxes` with `study_filter: "FVG"`, `verbose: true`. Decode `borderColor` as ABGR per `feedback_fvg_color_decoding` memory: green/teal-leaning → bullish FVG, red/orange-leaning → bearish FVG, mid-blue → iFVG (skip). Every FVG cited downstream must carry a direction prefix.
 
-#### 2.3 Derive ICC ind / TP / inv (mandatory on 4h)
+#### 2.3 Derive ICC ind / TP / inv + 4h range position (mandatory on 4h)
 
-4. `chart_set_timeframe` 240 → `data_get_structure_zones` with `include_mitigated: true`, `within_points: 500`. Use the recent BOS/ChoCh sequence to derive `ind` (broken pivot), `TP` (resulting new HH/LL — only set once a pullback has crystallized it as a pivot, otherwise show `TP forming`), and `inv` (the previous PHL/PLH one back from the most recent). All three are reference-only and must appear in the 4h trend label. Phase choice (Indication / Correction / Continuation / No Trade) must be consistent with where current price sits relative to `ind` and `TP`.
+4. `chart_set_timeframe` 240. Then parallel pull:
+   - `data_get_structure_zones` with `include_mitigated: true`, `within_points: 500` → for ICC pivots
+   - `data_get_ohlcv` with `count: 30`, `summary: true` → 4h range high/low over the last ~5 days (for curve location)
+
+**ICC pivots.** Use the recent BOS/ChoCh sequence to derive `ind` (broken pivot), `TP` (resulting new HH/LL — only set once a pullback has crystallized it as a pivot, otherwise show `TP forming`), and `inv` (the previous PHL/PLH one back from the most recent). All three are reference-only and must appear in the 4h trend label. Phase choice (Indication / Correction / Continuation / No Trade) must be consistent with where current price sits relative to `ind` and `TP`.
+
+**4h range position (the Curve).** From the 4h OHLCV summary, take `range_high` (30-bar high) and `range_low` (30-bar low). Compute current price's position: `pos = (current_price − range_low) / (range_high − range_low)`. Classify:
+
+- `pos < 0.25` → **near low** of 4h range
+- `0.25 ≤ pos ≤ 0.75` → **mid** of 4h range
+- `pos > 0.75` → **near high** of 4h range
+
+Surface the classification on the per-symbol Trend line (`4h range: near low / mid / near high`).
+
+**Curve check (grade impact).** A demand zone with current price near the high of the 4h range, or a supply zone near the low, is anti-confluence — we'd be buying at the range top or shorting at the range bottom. Downgrade one notch unless the cluster check (2.7) overrides. A demand zone near the low or supply near the high is curve-aligned: no penalty, no bonus.
 
 #### 2.4 Verify today's session state (MANDATORY — do not skip)
 
@@ -107,10 +121,20 @@ For each symbol, compute the session high and low from the 60-bar 15m OHLCV, the
    - If label is *below* current price and session low ≤ label → label is **TAKEN**. Mark `(taken)` in the Liquidity section.
    - Otherwise → **alive**. This is a live magnet.
 
-2. **Zone SL vs session range.** For each unmitigated zone, compare SL to session high/low:
-   - Supply zone: if session high ≥ zone SL → **wick-tested**. Flag in the Zones table Note column.
-   - Demand zone: if session low ≤ zone SL → **wick-tested**. Flag in the Zones table Note column.
-   - A wick-tested zone is structurally weaker than a fresh zone. Downgrade grade accordingly.
+2. **Zone intrusion vs session range.** For each unmitigated zone, classify its mitigation state. Three states, in increasing severity:
+
+   - **Fresh** — session extreme has not crossed the zone's entry (proximal) edge.
+     - Supply: session high < entry. Demand: session low > entry.
+   - **Wick-tested** — extreme crossed entry into the zone, but no 15m bar *closed* inside the zone.
+     - Supply: session high ≥ entry, no close ≥ entry. Demand: session low ≤ entry, no close ≤ entry.
+   - **Body-touched** — at least one 15m bar closed inside the zone (between entry and SL).
+     - Supply: any 15m close in `[entry, SL)`. Demand: any 15m close in `(SL, entry]`.
+
+   If a bar closed *through* SL, the indicator removes the zone — it won't appear in the unmitigated set.
+
+   Detecting body-touched needs bar closes. 2.1's OHLCV pull uses `summary: true` and only exposes session high/low. When a zone shows an extreme crossing past entry (i.e., it's at minimum wick-tested) **and** the zone is a real trade candidate (closest unmitigated to price, or part of a cross-TF stack), do one targeted `data_get_ohlcv` pull with `count: 60, summary: false` to scan closes. For far-off zones, skip the refinement and flag conservatively as `wick-tested`.
+
+   **Grade impact:** wick-tested = no grade penalty (the trap's first line held). Body-touched = downgrade one notch (orders inside the zone were filled). Flag the state in the Zones table Note column.
 
 3. **3R target vs session range.** For each proposed entry's `tp_3R`:
    - Short thesis: if session low ≤ tp_3R → the target has already been hit this session. The thesis has **already played out**.
@@ -145,6 +169,18 @@ Present entry/SL/TP **in points** (no dollar math). Note size (= risk in points)
 - **Derived equilibriums:** **PD-EQ** = (PDH + PDL) / 2 · **PW-EQ** = (PWH + PWL) / 2 · **PM-EQ** = (PMH + PML) / 2. Compute inline; not drawn by the indicator.
 
 Scan the range between `entry` and `tp_3R` for any *alive* level (skip taken ones — they're not magnets anymore). Apply the same session-sweep rule from 2.4 to the EQ levels: if session high/low has already traded through the EQ price, it's taken. Any alive hit inside the range is a likely reaction point that overrides the arithmetic 3R. Surface it in **The Trade** block as the realistic target; keep the 3R figure as the math reference. If multiple alive levels sit inside the range, the nearest one to entry is the primary TP, the next becomes the runner.
+
+**3R floor (hard skip).** Compute the realistic target's distance from entry as a multiple of `risk`: `R_realized = |target − entry| / risk`. If `R_realized < 3` — i.e., the nearest alive magnet beats the arithmetic 3R figure — the trade fails the reward-to-risk floor. Set Call to **PASS**, Grade **F**, and put `below 3R floor — nearest alive magnet at {price} ({R_realized}R)` in The Trade block. Do not pitch the entry as actionable. The structure may be valid; the math isn't.
+
+**Departure strength check (reviewer judgment).** Before grading a candidate zone, examine the 4h chart for the impulse that created it — the move from the base to the BOS/ChoCh label.
+
+- **Sharp departure** — at least 2 large-bodied candles, minimal fighting wicks, little body overlap, displacement clears ≥ 2× the zone's width within 3 bars.
+- **Weak departure** — drifty bars with body overlap, fighting wicks, took 5+ bars to clear 1× zone width.
+- **Unflagged** — anything in between; don't force the call.
+
+Weak departures = lower-quality imbalance regardless of zone size or freshness. Downgrade one notch when the candidate zone is `weak departure`. Surface the flag in the Zones table Note column.
+
+Detection: `data_get_structure_zones` doesn't expose creation timestamps, so this is reviewer judgment from the visible 4h chart. Apply only to zones that are real trade candidates (closest unmitigated to price, or part of the cluster). If the call isn't obvious, leave unflagged — don't speculate.
 
 #### 2.7 Check confluence
 
@@ -237,7 +273,7 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 ```
 ## {TICKER} — {Description} · {price} · Grade {X}
 
-**Trend:** 4h {Up/Down/Choppy} ({ICC phase}) · 15m {Up/Down/Choppy}
+**Trend:** 4h {Up/Down/Choppy} ({ICC phase}) · 15m {Up/Down/Choppy} · 4h range: {near low / mid / near high}
 **Call:** **{GO LONG / GO SHORT / WATCH / PASS}** — {one-line verdict}
 **Grade rationale:** {ONE sentence — comma-separated layers that aligned, plus one because-clause if held back from a higher grade. If it doesn't fit in one sentence, the rationale is wrong.}
 
@@ -249,12 +285,12 @@ Use `+` or `-` modifiers for exceptional features (extreme tightness, 3R-lands-o
 
 | TF  | Type           | Range       | Size    | Note                                          |
 |-----|----------------|-------------|---------|-----------------------------------------------|
-| 15m | Demand/Supply  | low — high  | X pts   | fresh / wick-tested (X high/low) / stacked   |
+| 15m | Demand/Supply  | low — high  | X pts   | fresh / wick-tested (X) / body-touched (X) / stacked / weak departure |
 | 4h  | Demand/Supply  | low — high  | X pts   | …                                             |
 
 Optional note below table: "Zones overlap at X — X" (cross-timeframe stack).
 
-**Note column is mandatory.** Every zone must be flagged as `fresh` or `wick-tested (X)` per Stage 2.4 of the workflow. FVG overlap and cross-timeframe stack go here too. **FVG references in the Note column must carry direction:** `bullish FVG below at X — Y` or `bearish FVG above at X — Y`. A bare "FVG" reference fails review.
+**Note column is mandatory.** Every zone must be flagged as `fresh`, `wick-tested (X)`, or `body-touched (X)` per Stage 2.4 of the workflow. Append `weak departure` from Stage 2.6 when the impulse was drifty. FVG overlap and cross-timeframe stack go here too. **FVG references in the Note column must carry direction:** `bullish FVG below at X — Y` or `bearish FVG above at X — Y`. A bare "FVG" reference fails review.
 
 ### Liquidity
 
@@ -377,3 +413,4 @@ If the numbers and the phase contradict (e.g. labeling phase = Indication while 
 7. Tighter zones beat wider zones — always note size in the report.
 8. **MANDATORY session-sweep check (Stage 2.4).** Before publishing, pull 60-bar 15m OHLCV and cross-check every cited label, zone SL, and 3R target against session high/low. Mark every label `(taken)` or `(alive)`. Mark every zone `fresh` or `wick-tested`. If a 3R target has already been traded through this session, the trade is not live — downgrade or pass. A report missing these markers is data-incorrect. Skipping this check has cost real money (see `feedback_verify_swept_levels.md` in memory).
 9. **Stage 1 triage is mandatory.** Do not pull FVG verbose color decode, 4h history (`include_mitigated: true`), or 15m OHLCV on a symbol that hasn't passed the Qualify rules. The whole point of staging is to avoid paying for those on symbols that have no actionable setup. If a Stage 1 verdict feels wrong, refine the rules — don't bypass them.
+10. **3R floor enforced.** If the realistic target (nearest alive magnet inside entry→3R, per Stage 2.6) sits at less than 3× risk from entry, the trade fails the reward-to-risk floor. Call PASS, Grade F. Do not pitch the entry as actionable. The structure may be valid; the math isn't.
