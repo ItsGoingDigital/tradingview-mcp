@@ -431,7 +431,7 @@ export async function getPineTables({ study_filter } = {}) {
 
 export async function getStructureZones({ study_filter, within_points, current_price, include_mitigated } = {}) {
   const filter = study_filter || 'Market Structure';
-  const [linesRaw, labelsRaw, price] = await Promise.all([
+  const [linesRaw, labelsRaw, price, barsArr] = await Promise.all([
     evaluate(buildGraphicsJS('dwglines', 'lines', filter)),
     evaluate(buildGraphicsJS('dwglabels', 'labels', filter)),
     current_price != null ? Promise.resolve(current_price) : evaluate(`
@@ -440,6 +440,25 @@ export async function getStructureZones({ study_filter, within_points, current_p
         if (!bars || typeof bars.lastIndex !== 'function') return null;
         var last = bars.valueAt(bars.lastIndex());
         return last ? last[4] : null;
+      })()
+    `),
+    // All available chart bars (high/low only) for OHLCV-based mitigation.
+    // Mitigation rule: demand zone is mitigated when any bar AFTER the swing-low
+    // pivot has low < dsh.y1; supply mitigated when any bar after the swing-high
+    // pivot has high > dsh.y1. This matches what the LuxAlgo indicator visually
+    // shows on the chart (zone broken = swing pivot taken out).
+    evaluate(`
+      (function() {
+        var bars = ${BARS_PATH};
+        if (!bars || typeof bars.lastIndex !== 'function') return null;
+        var out = [];
+        var last = bars.lastIndex();
+        var first = bars.firstIndex();
+        for (var i = first; i <= last; i++) {
+          var v = bars.valueAt(i);
+          if (v) out.push({ h: v[2], l: v[3] });
+        }
+        return out;
       })()
     `),
   ]);
@@ -476,9 +495,44 @@ export async function getStructureZones({ study_filter, within_points, current_p
     const sols = lines.filter(l => l.style === 'sol').sort((a, b) => a.x1 - b.x1);
     if (sols.length === 0 || dshs.length === 0) return { name: s.name, total_events: 0, unmitigated_count: 0, zones: [] };
 
-    const maxDshX2 = dshs.reduce((m, l) => Math.max(m, l.x2), 0);
     const labels = labelsByStudy[s.name] || [];
 
+    // OHLCV-based mitigation: find the swing-pivot bar (where the dashed
+    // line's y1 matches a bar's low for demand / high for supply), then check
+    // if any subsequent bar has wicked past that pivot price.
+    function isZoneMitigated(dshPrice, isDemand) {
+      if (!barsArr || barsArr.length === 0) return false;
+      const tol = 0.01;
+      let pivotIdx = -1;
+      // Find the most recent bar matching the pivot price
+      for (let i = barsArr.length - 1; i >= 0; i--) {
+        const b = barsArr[i];
+        const ref = isDemand ? b.l : b.h;
+        if (ref != null && Math.abs(ref - dshPrice) <= tol) {
+          pivotIdx = i;
+          break;
+        }
+      }
+      // Pivot not found in loaded bar history — the swing is older than the
+      // ~300-bar window TradingView keeps in `mainSeries().bars()`. Without
+      // bars covering the pivot, we can't verify whether price has tagged
+      // the level since. Default to MITIGATED (the safer assumption — older
+      // zones are very likely to have been retested by now, and a false
+      // positive here just hides clutter rather than producing fake levels).
+      if (pivotIdx < 0) return true;
+      // Check bars after the pivot for a wick past the level
+      for (let i = pivotIdx + 1; i < barsArr.length; i++) {
+        const b = barsArr[i];
+        if (isDemand && b.l != null && b.l < dshPrice - tol) return true;
+        if (!isDemand && b.h != null && b.h > dshPrice + tol) return true;
+      }
+      return false;
+    }
+
+    // Pair each solid (break trigger) with the closest unused dashed (paired
+    // swing pivot). Tolerance 6 because on higher TFs (W/D) the swing low and
+    // swing high of a ChoCH structure can sit 4-5 bars apart — a 3-bar limit
+    // misses real zones (e.g. weekly TSLA ChoCH supply pair sits 4 bars apart).
     const usedDshIds = new Set();
     const pairs = [];
     for (const sol of sols) {
@@ -488,7 +542,7 @@ export async function getStructureZones({ study_filter, within_points, current_p
         if (usedDshIds.has(dsh.id)) continue;
         if (dsh.color !== sol.color) continue;
         const dist = Math.abs(dsh.x1 - sol.x1);
-        if (dist <= 3 && dist < bestDist) { best = dsh; bestDist = dist; }
+        if (dist <= 6 && dist < bestDist) { best = dsh; bestDist = dist; }
       }
       if (best) {
         usedDshIds.add(best.id);
@@ -502,7 +556,7 @@ export async function getStructureZones({ study_filter, within_points, current_p
       const sl = p.dsh.y1;
       const risk = Math.round(Math.abs(entry - sl) * 100) / 100;
       const tp = bullish ? entry + 3 * risk : entry - 3 * risk;
-      const mitigated = p.dsh.x2 < maxDshX2;
+      const mitigated = isZoneMitigated(p.dsh.y1, bullish);
       let eventText = '';
       let bestLabelDist = Infinity;
       for (const lab of labels) {

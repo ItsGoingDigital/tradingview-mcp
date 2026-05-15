@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamma Heatmap · 0DTE · SPX</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --frame: #131313;
+    --frame-2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --text: #f0f0f0;
+    --text-mute: #8a8a8a;
+    --text-dim: #4a4a4a;
+    --accent: #fbbf24;                /* price line only — exogenous reference */
+    --accent-soft: rgba(251,191,36,0.15);
+    --pos-hue: 130;                   /* green — positive gex / call magnets / walls */
+    --neg-hue: 355;                   /* red — negative gex / put magnets */
+    --row-h: 18px;
+    --label-col: 64px;
+    --value-col: 96px;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    padding: 72px 24px 48px;   /* top padding clears the fixed navbar */
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    line-height: 1.4;
+  }
+  .container { max-width: 720px; width: 100%; }
+
+  /* ──────── NAVBAR — shared across all heatmap pages ──────── */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--frame);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 24px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  .nav-inner {
+    max-width: 1620px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .nav-brand {
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: -0.3px;
+    color: var(--accent);
+  }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link {
+    color: var(--text-mute);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    padding: 5px 11px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-link:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+  }
+  .nav-link.active {
+    color: var(--accent);
+    background: rgba(251,191,36,0.08);
+    border-color: rgba(251,191,36,0.32);
+  }
+
+  /* ──────── HEADER ──────── */
+  .header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .ticker {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: -0.8px;
+    color: var(--text);
+  }
+  .ticker-name {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .expiry-tag {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    padding: 5px 10px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .subtitle {
+    color: var(--text-mute);
+    font-size: 13px;
+    margin-bottom: 8px;
+    font-weight: 400;
+  }
+  .subtitle strong { color: var(--text); font-weight: 700; }
+  .generated {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  /* ──────── STATS ROW ──────── */
+  .stats {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-radius: 4px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .stat {
+    background: var(--frame);
+    padding: 12px 14px;
+  }
+  .stat-label {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.3px;
+  }
+  .stat-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-value.pos { color: hsl(var(--pos-hue), 85%, 58%); }
+  .stat-value.neg { color: hsl(var(--neg-hue), 85%, 58%); }
+  .stat-value.wall-clr { color: var(--accent); }   /* walls = neutral structural marker (amber) */
+  /* Sub-line magnitudes are direction-bearing — color per sign */
+  .stat-sub.pos { color: hsl(var(--pos-hue), 70%, 55%); }
+  .stat-sub.neg { color: hsl(var(--neg-hue), 70%, 55%); }
+  /* Current Price — featured cell, larger + amber so the eye lands here first */
+  .stat-value.current {
+    color: var(--accent);
+    font-size: 22px;
+    letter-spacing: -0.5px;
+  }
+  .stat:has(.stat-value.current) {
+    background: linear-gradient(180deg, rgba(251,191,36,0.06), var(--frame));
+    border-right: 1px solid rgba(251,191,36,0.18);
+  }
+  .stat-asof {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Stacked walls — Wall ↑ on top half, Wall ↓ on bottom in one column slot */
+  .stat-walls {
+    background: var(--frame);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+  .wall-half {
+    flex: 1;
+    padding: 9px 14px;
+  }
+  .wall-half + .wall-half {
+    border-top: 1px solid var(--border);
+  }
+  .wall-half .stat-label { margin-bottom: 2px; }
+
+  /* Refresh button + toast */
+  .refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    background: var(--frame);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.32); }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-icon { font-size: 13px; line-height: 1; }
+  .toast {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-12px);
+    background: var(--frame);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 10px 18px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast code { color: var(--accent); font-family: inherit; margin-left: 6px; }
+
+  /* ──────── HEADER RIGHT GROUP ──────── */
+  .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  /* ──────── REGIME BADGE ──────── */
+  .regime-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+  }
+  /* Regime: neutral (white/gray). Color reserved for +/− / calls / puts. */
+  .regime-badge.positive {
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,0.28);
+  }
+  .regime-badge.negative {
+    background: rgba(255,255,255,0.03);
+    color: var(--text-mute);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-style: dashed;
+  }
+  .regime-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: regime-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes regime-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* ──────── THETA STRIP — inline metadata, recessed ──────── */
+  .theta-timeline {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: -8px 0 20px 0;
+  }
+  .theta-day {
+    padding: 3px 9px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 9.5px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .theta-day.past    { opacity: 0.45; }
+  .theta-day.future  { color: var(--text-mute); }
+  .theta-day.current {
+    background: rgba(251, 191, 36, 0.14);
+    color: var(--accent);
+    border-color: rgba(251, 191, 36, 0.45);
+  }
+  .theta-caption {
+    margin-left: 8px;
+    font-size: 9.5px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text-dim);
+  }
+
+  /* ──────── SESSION RANGE — tiny recessed strip under stats ──────── */
+  .session-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    margin-bottom: 12px;
+    font-size: 9.5px;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .session-range .sr-label { color: var(--text-mute); }
+  .session-range .sr-lo,
+  .session-range .sr-hi { color: var(--text); font-weight: 700; }
+  .session-range .sr-bar {
+    position: relative;
+    flex: 1;
+    height: 2px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 1px;
+    margin: 0 4px;
+  }
+  .session-range .sr-bar-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    left: 0; right: 0;
+    background: rgba(255,255,255,0.18);
+    border-radius: 1px;
+  }
+  .session-range .sr-now {
+    position: absolute;
+    top: -2px; bottom: -2px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .session-range .sr-span { color: var(--text-mute); }
+
+  /* ──────── CHART CONTROLS ──────── */
+  .chart-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 11px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    transition: all 0.15s;
+  }
+  .toggle:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .toggle[aria-pressed="true"] {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+  }
+  .toggle-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .toggle[aria-pressed="true"] .toggle-dot {
+    background: #fff;
+    box-shadow: 0 0 6px rgba(255,255,255,0.55);
+  }
+
+  /* ──────── HEATMAP ──────── */
+  .heatmap-frame {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: #000;
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .strike-row {
+    display: grid;
+    grid-template-columns: var(--label-col) 1fr var(--value-col);
+    align-items: stretch;
+    height: var(--row-h);
+  }
+  .strike-label {
+    color: var(--text-dim);
+    font-size: 10.5px;
+    text-align: right;
+    padding: 0 10px 0 6px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .strike-label.major {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .heat-cell {
+    height: 100%;
+    width: 100%;
+    position: relative;
+  }
+  /* Walls — structural strikes with amber hatching (neutral, not direction). */
+  .heat-cell.wall::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #fde68a 0px,
+      #fde68a 4px,
+      transparent 4px,
+      transparent 9px
+    );
+    pointer-events: none;
+  }
+  .heat-cell.wall::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-top: 1.5px solid var(--accent);
+    border-bottom: 1.5px solid var(--accent);
+    pointer-events: none;
+  }
+  /* Blocked cells — visible but behind a shadow */
+  .heat-cell.blocked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgba(0,0,0,0.55) 0px,
+      rgba(0,0,0,0.55) 1px,
+      transparent 1px,
+      transparent 5px
+    );
+    pointer-events: none;
+  }
+  .gex-value {
+    color: var(--text-dim);
+    font-size: 10.5px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .gex-value.peak-pos { color: hsl(var(--pos-hue), 90%, 60%); font-weight: 700; }
+  .gex-value.peak-neg { color: hsl(var(--neg-hue), 90%, 60%); font-weight: 700; }
+  .gex-value.significant { color: var(--text); }
+  .gex-value.wall-tag {
+    color: var(--accent);   /* amber — wall is structural, not direction */
+    font-weight: 700;
+  }
+  /* Bright-yellow peak (dominance ≥ 0.8) — text matches the star */
+  .gex-value.peak-bright {
+    color: #fde047 !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 6px rgba(253, 224, 71, 0.45);
+  }
+  .peak-star {
+    /* Color, font-size, opacity, and text-shadow are set inline per-strike
+       by peakStarHtml() based on dominanceScore — see render(). */
+    display: inline-block;
+    margin-left: 6px;
+    line-height: 1;
+    cursor: help;
+  }
+
+  /* Strat target — solid magenta line + pattern label */
+  .strat-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px solid #d946ef;
+    z-index: 8;
+    pointer-events: none;
+  }
+  .strat-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9px;
+    color: #f0abfc;
+    background: #000;
+    padding: 2px 5px;
+    border: 1px solid rgba(217, 70, 239, 0.55);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* Structure zone (weekly/daily S&D) — white-outlined box over the strike range */
+  .structure-zone {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    z-index: 7;
+    pointer-events: none;
+    border-radius: 2px;
+  }
+  .structure-zone-label {
+    position: absolute;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #000;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 2px 6px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .structure-zone-label.top { top: -9px; }
+  .structure-zone-label.bottom { bottom: -9px; }
+
+  /* Daily S&D structural events (CHoCH/BOS from Market Structure) */
+  .structure-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px dashed;
+    z-index: 7;
+    pointer-events: none;
+    opacity: 0.9;
+  }
+  .structure-line.choch { border-top-color: #f97316; }
+  .structure-line.bos   { border-top-color: rgba(226,232,240,0.7); }
+  .structure-event-marker {
+    position: absolute;
+    left: 4px;
+    top: -10px;
+    font-size: 9px;
+    background: #000;
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .structure-line.choch .structure-event-marker { color: #fdba74; border: 1px solid rgba(249,115,22,0.5); }
+  .structure-line.bos   .structure-event-marker { color: rgba(226,232,240,0.9); border: 1px solid rgba(226,232,240,0.35); }
+
+  /* VP Point of Control — dotted amber line, structural memory level */
+  .poc-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px dotted hsl(32, 95%, 60%);
+    z-index: 8;
+    pointer-events: none;
+  }
+  .poc-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9.5px;
+    color: hsl(32, 95%, 65%);
+    background: #000;
+    padding: 2px 6px;
+    border: 1px solid hsla(32, 95%, 50%, 0.55);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* Strat weekly target line — dashed, color reflects direction */
+  .strat-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px dashed;
+    z-index: 9;
+    pointer-events: none;
+  }
+  .strat-line.up   { border-top-color: hsl(var(--pos-hue), 90%, 60%); }
+  .strat-line.down { border-top-color: hsl(var(--neg-hue), 90%, 60%); }
+  .strat-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9.5px;
+    background: #000;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .strat-line.up .strat-marker {
+    color: hsl(var(--pos-hue), 90%, 65%);
+    border: 1px solid hsla(var(--pos-hue), 90%, 50%, 0.5);
+  }
+  .strat-line.down .strat-marker {
+    color: hsl(var(--neg-hue), 90%, 65%);
+    border: 1px solid hsla(var(--neg-hue), 90%, 50%, 0.5);
+  }
+
+  /* Disabled toggle (no data to toggle) */
+  .toggle.is-inactive {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .toggle.is-inactive:hover {
+    border-color: var(--border);
+    color: var(--text-mute);
+  }
+
+  /* Price line — solid yellow, arrows on both sides */
+  .price-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px solid var(--accent);
+    z-index: 10;
+    pointer-events: none;
+  }
+  .price-line::before, .price-line::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    width: 0; height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+  }
+  .price-line::before { left: -1px; border-left: 5px solid var(--accent); }
+  .price-line::after  { right: -1px; border-right: 5px solid var(--accent); }
+
+  /* Gamma flip line — dashed white, regime boundary */
+  .flip-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1px dashed rgba(255, 255, 255, 0.55);
+    z-index: 9;
+    pointer-events: none;
+  }
+  .flip-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.75);
+    background: #000;
+    padding: 2px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* Magnet pulse — colored ring matching the magnet sign */
+  .magnet-pulse {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: var(--row-h);
+    pointer-events: none;
+    z-index: 5;
+    animation: pulse-pos 2s ease-in-out infinite;
+  }
+  .magnet-pulse.neg { animation: pulse-neg 2.4s ease-in-out infinite; }
+  @keyframes pulse-pos {
+    0%, 100% { box-shadow: inset 0 0 0 1.5px hsl(var(--pos-hue), 95%, 65%), 0 0 14px 2px hsla(var(--pos-hue), 95%, 55%, 0.35); }
+    50%      { box-shadow: inset 0 0 0 1.5px hsl(var(--pos-hue), 95%, 80%), 0 0 28px 6px hsla(var(--pos-hue), 95%, 60%, 0.65); }
+  }
+  @keyframes pulse-neg {
+    0%, 100% { box-shadow: inset 0 0 0 1.5px hsl(var(--neg-hue), 95%, 65%), 0 0 14px 2px hsla(var(--neg-hue), 95%, 55%, 0.35); }
+    50%      { box-shadow: inset 0 0 0 1.5px hsl(var(--neg-hue), 95%, 80%), 0 0 28px 6px hsla(var(--neg-hue), 95%, 60%, 0.65); }
+  }
+
+  /* ──────── LEGEND ──────── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 10px 16px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-bottom: 16px;
+    font-weight: 500;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .legend-swatch {
+    width: 22px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .legend-swatch.pos { background: linear-gradient(90deg, hsl(130, 95%, 6%), hsl(130, 95%, 50%)); }
+  .legend-swatch.neg { background: linear-gradient(90deg, hsl(355, 95%, 6%), hsl(355, 95%, 50%)); }
+  .legend-swatch.dead { background: #000; outline: 1px solid var(--border); outline-offset: -1px; }
+  .legend-swatch.wall {
+    background:
+      repeating-linear-gradient(-45deg,
+        #fde68a 0px,
+        #fde68a 3px,
+        #b45309 3px,
+        #b45309 6px);
+  }
+  .legend-swatch.blocked {
+    background:
+      repeating-linear-gradient(-45deg, rgba(0,0,0,0.55), rgba(0,0,0,0.55) 1px, transparent 1px, transparent 4px),
+      hsl(355, 90%, 35%);
+  }
+  .legend-price {
+    width: 22px;
+    height: 0;
+    border-top: 1.5px solid var(--accent);
+  }
+
+  /* ──────── READ ──────── */
+  .read {
+    padding: 16px 20px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .read .section {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .read .section:last-child { border-bottom: none; padding-bottom: 0; }
+  .read .section:first-child { padding-top: 0; }
+  .read .label {
+    color: var(--text-mute);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .read .pos { color: hsl(var(--pos-hue), 90%, 60%); font-weight: 700; }
+  .read .neg { color: hsl(var(--neg-hue), 90%, 60%); font-weight: 700; }
+  .read .accent { color: hsl(var(--pos-hue), 100%, 70%); font-weight: 700; }   /* walls = bright teal */
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="nav-brand">γ Gamma</span>
+    <div class="nav-links">
+      <a href="gamma-heatmap-multi.html" class="nav-link">Cross-Asset</a>
+      <a href="gamma-heatmap-0dte.html" class="nav-link active">SPX 0DTE</a>
+      <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
+      <a href="screener.html" class="nav-link">Flow Screener</a>
+      <a href="scan.html" class="nav-link">EOW Scan</a>
+    </div>
+  </div>
+</nav>
+<div class="container">
+  <div class="header">
+    <span class="ticker" id="ticker"></span>
+    <span class="ticker-name" id="ticker-name"></span>
+    <div class="header-right">
+      <span class="regime-badge" id="regime-badge"></span>
+      <span class="expiry-tag" id="expiry-tag"></span>
+      <button class="refresh-btn" id="refresh-btn" type="button"
+              data-cmd="python3 scripts/refresh-spx-0dte.py"
+              title="Copy refresh command to clipboard">
+        <span class="refresh-icon">↻</span><span>Refresh</span>
+      </button>
+    </div>
+  </div>
+  <div class="subtitle" id="subtitle"></div>
+  <div class="generated" id="generated"></div>
+  <div class="toast" id="toast"></div>
+
+  <div class="stats" id="stats"></div>
+  <div class="session-range" id="session-range" style="display:none;"></div>
+
+  <div class="chart-controls">
+    <button class="toggle" id="toggle-flip" aria-pressed="true" type="button">
+      <span class="toggle-dot"></span>
+      <span>Flip Line</span>
+    </button>
+    <button class="toggle" id="toggle-poc" aria-pressed="true" type="button">
+      <span class="toggle-dot"></span>
+      <span>POC</span>
+    </button>
+    <button class="toggle" id="toggle-zones" aria-pressed="true" type="button">
+      <span class="toggle-dot"></span>
+      <span id="toggle-zones-label">Daily S&amp;D</span>
+    </button>
+    <button class="toggle" id="toggle-strat" aria-pressed="true" type="button">
+      <span class="toggle-dot"></span>
+      <span id="toggle-strat-label">Strat Target</span>
+    </button>
+  </div>
+
+  <div class="heatmap-frame" id="heatmap"></div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch pos"></div>call magnet</div>
+    <div class="legend-item"><div class="legend-swatch neg"></div>put magnet</div>
+    <div class="legend-item"><div class="legend-swatch dead"></div>no weight</div>
+    <div class="legend-item"><div class="legend-swatch wall"></div>wall</div>
+    <div class="legend-item"><div class="legend-swatch blocked"></div>blocked zone</div>
+    <div class="legend-item"><div class="legend-price"></div>price</div>
+  </div>
+
+  <div class="read" id="read"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG — swap this object to template another ticker
+// ═══════════════════════════════════════════════════
+const CONFIG = {
+  ticker: 'SPX',
+  name: 'S&P 500',
+  expiry: '2026-05-12',
+  expiryLabel: '0DTE 5/12',
+  today: '2026-05-12',
+  asOf: '2026-05-12T20:14:52.000000Z',
+  currentPrice: 7400.97,
+  atmStrike: 7400,
+  dayChange: null,
+  dayChangePct: null,
+  priceContext: 'Live pull · Unusual Whales API · 22:31:58 local',
+  gamma: {
+    oi: 4933958583,
+    vol: 1740507450886,
+    dir: 3093376141292
+  },
+  gammaFlip: 7400.0,
+  poc: null,
+  vpTimeframe: "Today's session — POC requires separate TradingView VP pull",
+  vpNote: "Live UW data · strike-level OI gamma · refresh by re-running scripts/refresh-spx-0dte.py",
+  strikeRange: { low: 7120, high: 7505, step: 5 },
+  strikes: {
+    7430: 1512853930,
+    7425: 2631010572,
+    7420: 1286544333,
+    7415: 2174580013,
+    7410: 1511062295,
+    7405: -5061957078,
+    7400: -4939829169,
+    7395: -575764016,
+    7390: -33173992,
+    7385: 184313667,
+    7380: -29086052,
+    7375: 1650127006,
+    7365: -263708031,
+    7360: 679699488,
+    7355: -428268226,
+    7350: 374416632,
+    7340: 500030537,
+    7335: -248562341,
+    7330: 245633824,
+    7325: 706034516,
+    7320: 119040369,
+    7315: -38405796,
+    7310: 306949001,
+    7300: 1111613469,
+    7295: -348022170,
+    7290: -201142499,
+    7280: -87144561,
+    7250: -24772506,
+    7235: -99017914,
+    7205: -63291601,
+    7200: -1129962837,
+    7195: -68078180,
+    7190: -94828964,
+    7175: -806771084,
+    7170: 234988178,
+    7160: -88414524
+  },
+  weeklyZones: [],
+  stratWeekly: { triggered: false, scenario: '0DTE', note: 'intraday · n/a · run TV pull for Strat classification' }
+};
+
+// ═══════════════════════════════════════════════════
+//  PURE FUNCTIONS — ticker-agnostic
+// ═══════════════════════════════════════════════════
+// Read hues from CSS variables — single source of truth, prevents drift between legend and cells
+const ROOT_STYLE = getComputedStyle(document.documentElement);
+const POS_HUE = parseFloat(ROOT_STYLE.getPropertyValue('--pos-hue')) || 220;
+const NEG_HUE = parseFloat(ROOT_STYLE.getPropertyValue('--neg-hue')) || 340;
+const ROW_H = 18;
+
+function intensityToColor(gex, maxAbs) {
+  if (gex === 0 || maxAbs === 0) return 'transparent';
+  // Power 0.7 still stretches mid-range so small cells stay visible.
+  // Lightness caps at 50% — the peak saturation point in HSL. The dominant
+  // magnet gets the most vivid color; everything else is darker (less color).
+  const intensity = Math.pow(Math.abs(gex) / maxAbs, 0.7);
+  const lightness = (4 + intensity * 46).toFixed(1);   // range: 4% → 50%
+  const hue = gex > 0 ? POS_HUE : NEG_HUE;
+  return `hsl(${hue}, 95%, ${lightness}%)`;
+}
+
+function pathResistance(targetStrike, currentPrice, strikesMap) {
+  if (Math.abs(targetStrike - currentPrice) < 0.5) return 0;
+  const lo = Math.min(targetStrike, currentPrice);
+  const hi = Math.max(targetStrike, currentPrice);
+  let resistance = 0;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    const s = parseFloat(k);
+    if (s > lo && s < hi) {
+      if (g > 0) resistance += g;
+      else resistance -= Math.abs(g) * 0.4;
+    }
+  }
+  return Math.max(0, resistance);
+}
+
+// Walls are the biggest positive-gex BLOCKERS between current price and the magnets.
+// A strike only qualifies as a wall if its gex is meaningful — at least 5% of the
+// chain's max absolute gex. Anything smaller is noise (filtered out here so the chart
+// doesn't flag tiny positives as walls).
+function findWalls(strikesMap, currentPrice, pinStrike, putStrike) {
+  const maxAbs = Math.max(...Object.values(strikesMap).map(Math.abs));
+  const WALL_MIN_RATIO = 0.05;            // 5% of max |gex|
+  const threshold = maxAbs * WALL_MIN_RATIO;
+  let dn = null, up = null, dnG = 0, upG = 0;
+  const lowerBound = putStrike !== null ? putStrike : -Infinity;
+  const upperBound = pinStrike !== null ? pinStrike : currentPrice;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    const s = parseFloat(k);
+    if (g <= threshold) continue;         // ignore tiny positives — not real walls
+    if (s < currentPrice && s > lowerBound && g > dnG) { dn = s; dnG = g; }
+    if (s > upperBound && g > upG) { up = s; upG = g; }
+  }
+  return { down: dn, up: up, downGex: dnG, upGex: upG };
+}
+
+// Strike-row generator — unions the regular grid with any odd strikes from the data
+// (handles tickers with mixed $1 / $2.50 strike grids).
+function buildStrikes(cfg) {
+  const { low, high, step } = cfg.strikeRange;
+  const set = new Set();
+  for (let s = high; s >= low; s -= step) set.add(Math.round(s * 100) / 100);
+  Object.keys(cfg.strikes).map(Number).forEach(s => {
+    if (s >= low && s <= high) set.add(s);
+  });
+  return Array.from(set).sort((a, b) => b - a);
+}
+
+function findMagnets(strikesMap) {
+  let posMax = null, negMax = null, posG = 0, negG = 0;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    if (g > posG) { posMax = parseFloat(k); posG = g; }
+    if (g < negG) { negMax = parseFloat(k); negG = g; }
+  }
+  return { positive: posMax, negative: negMax, posGex: posG, negGex: negG };
+}
+
+// Build week timeline from today + expiry — trading days (Mon-Fri) inclusive.
+function buildWeekTimeline(todayStr, expiryStr) {
+  if (!todayStr || !expiryStr) return null;
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const today  = new Date(todayStr + 'T00:00:00');
+  const expiry = new Date(expiryStr + 'T00:00:00');
+  if (isNaN(today) || isNaN(expiry) || expiry < today) return null;
+  // Walk backward from expiry up to ~5 trading days, building the path
+  const days = [];
+  const cursor = new Date(today);
+  let currentIdx = -1;
+  while (cursor <= expiry) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) {
+      if (currentIdx === -1) currentIdx = 0;
+      days.push({ label: DAY_NAMES[dow], iso: cursor.toISOString().slice(0,10) });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return { days, currentIdx };
+}
+
+function fmtMoney(v) {
+  // One decimal across all magnitudes to preserve nuance between close
+  // runners (e.g. $2.1B vs $1.7B don't collapse to the same display).
+  if (v === 0) return '·';
+  const abs = Math.abs(v);
+  const sign = v >= 0 ? '+' : '−';
+  if (abs >= 1_000_000_000) return `${sign}$${(abs/1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000)     return `${sign}$${(abs/1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)         return `${sign}$${(abs/1000).toFixed(1)}k`;
+  return `${sign}$${Math.round(abs)}`;
+}
+
+// Dominance score for the peak-star — how dwarfed are the runners-up?
+// Formula: ratio = peak_|gex| / median(|gex| of next 5 strikes), then
+// log₁₀(ratio)/log₁₀(8) clamped to [0,1]. Score 1.0 = peak is 8× or more
+// the typical big strike (light-years). Score 0 = peak barely above peers.
+function dominanceScore(strikesMap, peakStrike) {
+  if (peakStrike == null) return 0;
+  const peakAbs = Math.abs(strikesMap[peakStrike] || 0);
+  if (peakAbs === 0) return 0;
+  const others = Object.entries(strikesMap)
+    .filter(([k]) => parseFloat(k) !== peakStrike)
+    .map(([, v]) => Math.abs(v))
+    .filter(v => v > 0)
+    .sort((a, b) => b - a)
+    .slice(0, 5);
+  if (!others.length) return 1;
+  const median = others[Math.floor(others.length / 2)];
+  if (median <= 0) return 1;
+  const ratio = peakAbs / median;
+  return Math.max(0, Math.min(1, Math.log10(ratio) / Math.log10(8)));
+}
+
+// Render the peak-star with brightness/glow/size continuously scaled by score.
+function peakStarHtml(score, peakGex) {
+  const filled = score >= 0.2 ? '★' : '☆';
+  const fontSize = 10 + score * 4;                    // 10px → 14px
+  const opacity = 0.45 + score * 0.55;                // 0.45 → 1.0
+  // Color shifts from muted amber → hot yellow as dominance peaks
+  const hotYellow = score >= 0.8;
+  const color = hotYellow ? '#fde047' : 'var(--accent)';
+  // Glow only starts above score 0.5 — below that the star is just dim.
+  // Normalize the top half of the range so the glow ramps cleanly 0 → 14px.
+  let shadowCss = 'none';
+  if (score >= 0.5) {
+    const t = (score - 0.5) / 0.5;                    // 0 → 1 over [0.5, 1]
+    const blur = t * 14;
+    const glowOpacity = 0.3 + t * 0.6;
+    const shadowColor = hotYellow
+      ? `rgba(253,224,71,${glowOpacity})`
+      : `rgba(251,191,36,${glowOpacity})`;
+    shadowCss = `0 0 ${blur.toFixed(1)}px ${shadowColor}`;
+  }
+  const title = `Peak |gex| dominance ${score.toFixed(2)} · ${fmtMoney(peakGex)}`;
+  return `<span class="peak-star" style="`
+       + `font-size:${fontSize.toFixed(1)}px;`
+       + `opacity:${opacity.toFixed(2)};`
+       + `color:${color};`
+       + `text-shadow:${shadowCss};`
+       + `" title="${title}">${filled}</span>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════
+function render(cfg) {
+  document.title = `Gamma Heatmap · ${cfg.ticker} · ${cfg.expiryLabel}`;
+  document.getElementById('ticker').textContent = cfg.ticker;
+  document.getElementById('ticker-name').textContent = cfg.name;
+  document.getElementById('expiry-tag').textContent = cfg.expiryLabel;
+  // Subtitle: day change only (Current Price is now promoted to the stats row;
+  // ATM dropped — wasn't pulling weight). Hide if no day data available.
+  const subtitleBits = [];
+  if (cfg.dayChange != null && cfg.dayChangePct != null) {
+    const sign = cfg.dayChange >= 0 ? '+' : '−';
+    subtitleBits.push(`Day <strong>${sign}$${Math.abs(cfg.dayChange)} (${sign}${Math.abs(cfg.dayChangePct)}%)</strong>`);
+  }
+  const subEl = document.getElementById('subtitle');
+  if (subtitleBits.length) {
+    subEl.innerHTML = subtitleBits.join(' <span style="color:var(--text-dim);">·</span> ');
+    subEl.style.display = '';
+  } else {
+    subEl.style.display = 'none';
+  }
+
+  // Generated timestamp — shows when this snapshot was captured
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
+    document.getElementById('generated').textContent = `Generated · ${stamp}`;
+  }
+
+  // ── Regime badge — prefer explicit cfg.regime (matches multi's logic), fall
+  // back to flip comparison only if no regime field is present. Avoids the
+  // false-negative artifact that occurs when flip == price (deep-positive case).
+  const regimeEl = document.getElementById('regime-badge');
+  let regimeKind = null;
+  if (cfg.regime === 'positive') regimeKind = 'positive';
+  else if (cfg.regime === 'negative') regimeKind = 'negative';
+  else if (cfg.gammaFlip != null) regimeKind = cfg.currentPrice > cfg.gammaFlip ? 'positive' : 'negative';
+  if (regimeKind === 'positive') {
+    regimeEl.className = 'regime-badge positive';
+    regimeEl.innerHTML = '<span class="regime-dot"></span>Positive Gamma · Compression';
+    regimeEl.style.display = '';
+  } else if (regimeKind === 'negative') {
+    regimeEl.className = 'regime-badge negative';
+    regimeEl.innerHTML = '<span class="regime-dot"></span>Negative Gamma · Expansion';
+    regimeEl.style.display = '';
+  } else {
+    regimeEl.style.display = 'none';
+  }
+
+
+  const magnets = findMagnets(cfg.strikes);
+  // Threshold magnets — relative (5% of max |gex|). A fixed absolute floor was
+  // tuned for the old /spot-exposures/strike values (~10⁹ scale) and silently
+  // nulled valid pins now that we pull /greek-exposure/strike (~10⁴ scale).
+  const _vals = Object.values(cfg.strikes);
+  const _maxAbsAll = _vals.length ? Math.max(..._vals.map(Math.abs)) : 0;
+  const _magnetThreshold = _maxAbsAll * 0.05;
+  const pinStrike = (magnets.positive !== null && magnets.posGex >= _magnetThreshold) ? magnets.positive : null;
+  const putStrike = (magnets.negative !== null && magnets.negGex <= -_magnetThreshold) ? magnets.negative : null;
+  const walls   = findWalls(cfg.strikes, cfg.currentPrice, pinStrike, putStrike);
+
+  // Stats row — gracefully handle null/missing magnets and walls
+  // Direction class derived from sub text sign: "+" → pos, "−" → neg
+  const subSignCls = (s) => {
+    if (typeof s !== 'string') return '';
+    if (s.startsWith('+')) return 'pos';
+    if (s.startsWith('−') || s.startsWith('-')) return 'neg';
+    return '';
+  };
+  const statCard = (label, value, sub, cls) => `
+    <div class="stat">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value ${cls || ''}">${value}</div>
+      <div class="stat-sub ${subSignCls(sub)}">${sub}</div>
+    </div>
+  `;
+  const pinPresent = pinStrike !== null;
+  const putPresent = putStrike !== null;
+  // Current Price as the first/featured stat — gets the eye before pin/walls.
+  const curSub = (cfg.dayChange != null && cfg.dayChangePct != null)
+    ? `${cfg.dayChange >= 0 ? '+' : '−'}$${Math.abs(cfg.dayChange)} (${cfg.dayChange >= 0 ? '+' : '−'}${Math.abs(cfg.dayChangePct)}%)`
+    : (cfg.expiryLabel || '');
+  // "As of" timestamp under the current price — second precision
+  let asOfStr = '';
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2, '0');
+    asOfStr = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
+  }
+  const asOfHtml = asOfStr ? `<div class="stat-asof">as of ${asOfStr}</div>` : '';
+  // Walls stacked vertically in one column slot
+  const wallUpSub = walls.up !== null ? fmtMoney(walls.upGex, 1) : 'open path';
+  const wallDnSub = walls.down !== null ? fmtMoney(walls.downGex, 1) : 'open path';
+  const wallsHtml = `
+    <div class="stat stat-walls">
+      <div class="wall-half">
+        <div class="stat-label">Wall Up</div>
+        <div class="stat-value wall-clr">${walls.up !== null ? `$${walls.up}` : '—'}</div>
+        <div class="stat-sub ${subSignCls(wallUpSub)}">${wallUpSub}</div>
+      </div>
+      <div class="wall-half">
+        <div class="stat-label">Wall Down</div>
+        <div class="stat-value wall-clr">${walls.down !== null ? `$${walls.down}` : '—'}</div>
+        <div class="stat-sub ${subSignCls(wallDnSub)}">${wallDnSub}</div>
+      </div>
+    </div>`;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">
+      <div class="stat-label">Current Price</div>
+      <div class="stat-value current">$${cfg.currentPrice.toLocaleString()}</div>
+      <div class="stat-sub ${subSignCls(curSub)}">${curSub}</div>
+      ${asOfHtml}
+    </div>` +
+    statCard('Pin Target',
+      pinPresent ? `$${magnets.positive}` : '—',
+      pinPresent ? fmtMoney(magnets.posGex, 1) : 'no call magnet',
+      'pos') +
+    wallsHtml +
+    statCard('Put Magnet',
+      putPresent ? `$${magnets.negative}` : '—',
+      putPresent ? fmtMoney(magnets.negGex, 1) : 'no put magnet',
+      'neg');
+
+  // Session-range strip — shows where price has already traveled today
+  const sessionRangeEl = document.getElementById('session-range');
+  if (sessionRangeEl) {
+    const sr = cfg.sessionRange;
+    if (sr && sr.high != null && sr.low != null) {
+      const range = Math.max(0.0001, sr.high - sr.low);
+      const pos = Math.max(0, Math.min(1, (cfg.currentPrice - sr.low) / range));
+      const span = sr.high - sr.low;
+      const lbl = sr.label || 'Day';
+      sessionRangeEl.style.display = 'flex';
+      sessionRangeEl.innerHTML = `
+        <span class="sr-label">${lbl}</span>
+        <span class="sr-lo">$${sr.low}</span>
+        <div class="sr-bar">
+          <div class="sr-bar-fill"></div>
+          <div class="sr-now" style="left:${(pos * 100).toFixed(1)}%;"></div>
+        </div>
+        <span class="sr-hi">$${sr.high}</span>
+        <span class="sr-span">${span >= 10 ? span.toFixed(1) : span.toFixed(2)} pt</span>
+      `;
+    } else {
+      sessionRangeEl.style.display = 'none';
+    }
+  }
+
+  // Build strike list (handles mixed strike grids — e.g. $1 below pivot, $2.50 above)
+  const strikes = buildStrikes(cfg);
+
+  // Identify the strike with the largest |gex| anywhere on the chain.
+  // Star brightness is driven by `peakDominance` — how dwarfed the runners-up are.
+  let peakAbsStrike = null, peakAbs = 0;
+  for (const [k, g] of Object.entries(cfg.strikes)) {
+    if (Math.abs(g) > peakAbs) { peakAbs = Math.abs(g); peakAbsStrike = parseFloat(k); }
+  }
+  const peakDominance = dominanceScore(cfg.strikes, peakAbsStrike);
+
+  const maxAbsGex = Math.max(...Object.values(cfg.strikes).map(Math.abs));
+
+  // Resistance per strike (for opacity)
+  const resistances = {};
+  strikes.forEach(s => resistances[s] = pathResistance(s, cfg.currentPrice, cfg.strikes));
+  const maxResistance = Math.max(...Object.values(resistances));
+
+  function isBlocked(strike) {
+    if (walls.down !== null && strike < walls.down) return true;
+    if (walls.up   !== null && strike > walls.up)   return true;
+    return false;
+  }
+
+  const container = document.getElementById('heatmap');
+  container.innerHTML = '';
+
+  let priceRowIdx = strikes.findIndex(s => s <= cfg.currentPrice);
+  let magnetPosIdx = pinPresent ? strikes.indexOf(pinStrike) : -1;
+  let magnetNegIdx = putPresent ? strikes.indexOf(putStrike) : -1;
+
+  strikes.forEach(strike => {
+    const gex     = cfg.strikes[strike] || 0;
+    const color   = intensityToColor(gex, maxAbsGex);
+    const isMajor = strike % 5 === 0;
+    const isWall  = strike === walls.down || strike === walls.up;
+    const blocked = isBlocked(strike) && !isWall;
+
+    // Opacity from path resistance (gentler — walls and stripes do most of the blocking work)
+    const opacity = maxResistance > 0
+      ? Math.max(0.35, 1 - Math.pow(resistances[strike] / maxResistance, 0.7) * 0.5)
+      : 1;
+
+    const cellClasses = ['heat-cell'];
+    if (isWall) cellClasses.push('wall');
+    if (blocked) cellClasses.push('blocked');
+
+    let valueClass = '';
+    if (gex > 1_000_000) valueClass = 'peak-pos';
+    else if (gex < -300_000) valueClass = 'peak-neg';
+    else if (Math.abs(gex) > 200_000) valueClass = 'significant';
+    if (isWall) valueClass = 'wall-tag';
+
+    const isPeak = strike === peakAbsStrike;
+    // Bright-yellow peak (dominance ≥ 0.8) → match the star: bold yellow text.
+    if (isPeak && peakDominance >= 0.8) valueClass = 'peak-bright';
+    const starHtml = isPeak ? peakStarHtml(peakDominance, gex) : '';
+
+    const row = document.createElement('div');
+    row.className = 'strike-row';
+    row.innerHTML = `
+      <div class="strike-label ${isMajor ? 'major' : ''}">$${strike}</div>
+      <div class="${cellClasses.join(' ')}" style="background:${color};opacity:${opacity.toFixed(2)};"
+           title="$${strike} · gex ${fmtMoney(gex)} · path resistance ${fmtMoney(resistances[strike], 1)}"></div>
+      <div class="gex-value ${valueClass}">${fmtMoney(gex)}${starHtml}</div>
+    `;
+    container.appendChild(row);
+  });
+
+  // Price line
+  const priceLine = document.createElement('div');
+  priceLine.className = 'price-line';
+  const sa = strikes[priceRowIdx - 1];
+  const sb = strikes[priceRowIdx];
+  const interp = (sa != null && sb != null) ? (sa - cfg.currentPrice) / (sa - sb) : 0.5;
+  priceLine.style.top = ((priceRowIdx - 1 + interp) * ROW_H) + 'px';
+  container.appendChild(priceLine);
+
+  // Strike→pixel interpolation (used by flip line and daily zones)
+  function strikeToY(price) {
+    const idx = strikes.findIndex(s => s <= price);
+    if (idx < 0) return strikes.length * ROW_H;
+    if (idx === 0) return 0;
+    const sa = strikes[idx - 1], sb = strikes[idx];
+    const interp = sa !== sb ? (sa - price) / (sa - sb) : 0;
+    return (idx - 1 + interp) * ROW_H;
+  }
+
+  // Gamma flip line — regime boundary
+  if (cfg.gammaFlip != null
+      && cfg.gammaFlip >= cfg.strikeRange.low
+      && cfg.gammaFlip <= cfg.strikeRange.high) {
+    const flipLine = document.createElement('div');
+    flipLine.className = 'flip-line';
+    flipLine.style.top = strikeToY(cfg.gammaFlip) + 'px';
+    flipLine.innerHTML = `<div class="flip-marker">Flip $${cfg.gammaFlip}</div>`;
+    container.appendChild(flipLine);
+  }
+
+  // VP Point of Control — institutional fair-value level
+  if (cfg.poc != null
+      && cfg.poc >= cfg.strikeRange.low
+      && cfg.poc <= cfg.strikeRange.high) {
+    const pocLine = document.createElement('div');
+    pocLine.className = 'poc-line';
+    pocLine.style.top = strikeToY(cfg.poc) + 'px';
+    pocLine.innerHTML = `<div class="poc-marker">POC $${cfg.poc}</div>`;
+    container.appendChild(pocLine);
+  }
+
+  // Strat target — one line at the matched 3-bar setup's P1 high/low.
+  if (cfg.stratSetup && cfg.stratSetup.target != null
+      && cfg.stratSetup.target >= cfg.strikeRange.low
+      && cfg.stratSetup.target <= cfg.strikeRange.high) {
+    const ss = cfg.stratSetup;
+    const arrow = ss.direction === 'bullish' ? '↑' : '↓';
+    const stratLine = document.createElement('div');
+    stratLine.className = 'strat-line';
+    stratLine.style.top = strikeToY(ss.target) + 'px';
+    stratLine.innerHTML = `<div class="strat-marker">Strat ${arrow} ${ss.pattern} · $${ss.target}</div>`;
+    container.appendChild(stratLine);
+  }
+
+  // Daily S&D zones — proper zone rectangles (upper + lower edges paired
+  // from the Market Structure CHoCH/BOS indicator) render below via the
+  // weeklyZones loop. No single-line BOS/ChoCh markers — both event types
+  // contribute zones, not standalone lines.
+
+  // Daily S&D zones — outlined rectangles spanning upper-to-lower price range.
+  // Zones come from the Market Structure CHoCH/BOS indicator paired into
+  // proper supply/demand boxes (top 3 closest per side, unmitigated).
+  const zones = cfg.weeklyZones || cfg.dailyZones || [];
+  zones.forEach(zone => {
+    if (zone.mitigated) return;
+    // Accept new `upper`/`lower` shape and legacy `entry`/`sl` for safety
+    const top = zone.upper != null ? zone.upper : Math.max(zone.entry, zone.sl);
+    const bot = zone.lower != null ? zone.lower : Math.min(zone.entry, zone.sl);
+    if (top < cfg.strikeRange.low || bot > cfg.strikeRange.high) return;
+    const visTop = Math.min(top, cfg.strikeRange.high);
+    const visBot = Math.max(bot, cfg.strikeRange.low);
+    const topPx = strikeToY(visTop);
+    const botPx = strikeToY(visBot);
+    const box = document.createElement('div');
+    box.className = 'structure-zone';
+    box.style.top = topPx + 'px';
+    box.style.height = (botPx - topPx) + 'px';
+    const labelPos = zone.type === 'supply' ? 'bottom' : 'top';
+    const sigil = zone.type === 'supply' ? 'S' : 'D';
+    box.innerHTML = `<div class="structure-zone-label ${labelPos}">${sigil} · $${top}—$${bot}</div>`;
+    container.appendChild(box);
+  });
+
+  // Weekly Strat target — only renders when a scenario has triggered
+  if (cfg.stratWeekly && cfg.stratWeekly.triggered && cfg.stratWeekly.target != null) {
+    const t = cfg.stratWeekly;
+    if (t.target >= cfg.strikeRange.low && t.target <= cfg.strikeRange.high) {
+      const line = document.createElement('div');
+      line.className = `strat-line ${t.direction === 'down' ? 'down' : 'up'}`;
+      line.style.top = strikeToY(t.target) + 'px';
+      line.innerHTML = `<div class="strat-marker">Strat ${t.scenario || ''} · $${t.target}</div>`;
+      container.appendChild(line);
+    }
+  }
+
+  // Magnet pulses
+  if (magnetPosIdx >= 0) {
+    const g = document.createElement('div');
+    g.className = 'magnet-pulse';
+    g.style.top = (magnetPosIdx * ROW_H) + 'px';
+    container.appendChild(g);
+  }
+  if (magnetNegIdx >= 0) {
+    const g = document.createElement('div');
+    g.className = 'magnet-pulse neg';
+    g.style.top = (magnetNegIdx * ROW_H) + 'px';
+    container.appendChild(g);
+  }
+
+  // Read — analysis block · all narrative/non-standard text lives here.
+  const readSections = [];
+
+  // First: any free-form analysis text from CONFIG (renders as the lead paragraph).
+  if (cfg.priceContext) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Analysis</span>
+        ${cfg.priceContext}
+      </div>`);
+  }
+
+  // ICT key levels pulled live from the TV Killzones indicator (PDH/PDL/PMH/
+  // PRE.H/M OPEN/etc.). Each level is a structural reference point that may
+  // not be in the gamma chain — useful confluence for the magnet/wall picks.
+  if (cfg.ictLevels && cfg.ictLevels.length) {
+    const items = cfg.ictLevels
+      .slice()
+      .sort((a, b) => b.price - a.price)
+      .map(l => `<span class="accent">${l.name}</span> $${l.price}`)
+      .join(' <span style="color:var(--text-dim);">·</span> ');
+    readSections.push(`
+      <div class="section">
+        <span class="label">ICT levels</span>
+        ${items}
+      </div>`);
+  }
+
+  if (pinPresent) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Pin</span>
+        Price wants to settle near <span class="pos">$${pinStrike}</span>, the dominant call magnet (${fmtMoney(magnets.posGex, 1)}).
+      </div>`);
+  } else {
+    readSections.push(`
+      <div class="section">
+        <span class="label">No pin</span>
+        No meaningful call magnet on the ${cfg.expiryLabel} chain. Price has nothing structural pulling it at this expiry.
+      </div>`);
+  }
+  if (walls.down === null && walls.up === null) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Open field</span>
+        No dealer call walls flanking current price${putPresent ? `; the only weight is the <span class="neg">$${putStrike}</span> put magnet (${fmtMoney(magnets.negGex, 1)})` : '; no meaningful magnets at all'}.
+      </div>`);
+  } else if (putPresent && walls.down !== null) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Downside</span>
+        <span class="neg">$${putStrike}</span> (${fmtMoney(magnets.negGex, 1)}) is gated by the <span class="accent">$${walls.down} wall</span> (${fmtMoney(walls.downGex, 1)}). The green-hatched band visualizes the blocker.
+      </div>`);
+  } else if (putPresent) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Downside</span>
+        <span class="neg">$${putStrike}</span> (${fmtMoney(magnets.negGex, 1)}) is visible on the chart with no call wall structurally blocking the path from current price.
+      </div>`);
+  }
+  if (walls.up !== null) {
+    readSections.push(`
+      <div class="section">
+        <span class="label">Upside</span>
+        Above ${pinPresent ? `the pin at $${pinStrike}` : 'current price'}, the next call concentration is the <span class="accent">$${walls.up} wall</span> (${fmtMoney(walls.upGex, 1)}). Reaching further upside requires breaking through.
+      </div>`);
+  }
+  readSections.push(`
+    <div class="section">
+      <span class="label">Friday close</span>
+      ${
+        pinPresent
+          ? `Most likely near <span class="pos">$${pinStrike}</span>${putPresent && walls.down !== null ? `; reaching $${putStrike} requires breaking the $${walls.down} wall` : ''}.`
+          : `No pin force — price drifts based on non-gamma factors (broader market, news, sector flow). ${cfg.expiryLabel} positioning is too thin to pin.`
+      }
+    </div>`);
+  document.getElementById('read').innerHTML = readSections.join('');
+}
+
+render(CONFIG);
+
+// Refresh button — clipboard + toast
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.refresh-btn');
+  if (!btn) return;
+  const cmd = btn.getAttribute('data-cmd') || '';
+  const toast = document.getElementById('toast');
+  const ok = () => {
+    if (!toast) return;
+    toast.innerHTML = `Copied — paste in terminal:<code>${cmd}</code>`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2400);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = cmd;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(ok).catch(() => { fallback(); ok(); });
+  } else {
+    fallback(); ok();
+  }
+});
+
+// Generic toggle wiring — hide/show any selector
+function wireToggle(buttonId, selector) {
+  const btn = document.getElementById(buttonId);
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('is-inactive')) return;
+    const wasOn = btn.getAttribute('aria-pressed') === 'true';
+    btn.setAttribute('aria-pressed', String(!wasOn));
+    document.querySelectorAll(selector).forEach(el => {
+      el.style.display = wasOn ? 'none' : '';
+    });
+  });
+}
+wireToggle('toggle-flip',  '.flip-line');
+wireToggle('toggle-poc',   '.poc-line');
+wireToggle('toggle-zones', '.structure-zone');
+wireToggle('toggle-strat', '.strat-line');
+
+// Reflect Strat state on its toggle — inactive STYLE only when no signal.
+// Label stays static ("Strat Target") — never shows error/log messaging.
+(function updateStratToggle() {
+  const t = CONFIG.stratWeekly || { triggered: false };
+  const btn = document.getElementById('toggle-strat');
+  if (!btn) return;
+  if (!t.triggered) {
+    btn.classList.add('is-inactive');
+    btn.setAttribute('aria-pressed', 'false');
+  }
+})();
+</script>
+</body>
+</html>

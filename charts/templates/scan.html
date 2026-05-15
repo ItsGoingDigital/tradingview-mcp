@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EOW Asymmetric Breakout Scan</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --frame: #131313;
+    --frame-2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --text: #f0f0f0;
+    --text-mute: #8a8a8a;
+    --text-dim: #4a4a4a;
+    --accent: #fbbf24;
+    --pos-hue: 130;
+    --neg-hue: 355;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    padding: 64px 24px 40px;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    line-height: 1.4;
+  }
+  .container { width: 100%; max-width: 1400px; }
+
+  /* ──────── NAVBAR (shared) ──────── */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--frame);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 24px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  .nav-inner { max-width: 1620px; margin: 0 auto; display: flex; align-items: center; gap: 20px; }
+  .nav-brand { font-weight: 900; font-size: 13px; letter-spacing: -0.3px; color: var(--accent); }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link {
+    color: var(--text-mute); text-decoration: none;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.4px;
+    text-transform: uppercase; padding: 5px 11px;
+    border-radius: 3px; border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); }
+  .nav-link.active { color: var(--accent); background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.32); }
+
+  /* ──────── HEADER ──────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header-left { display: flex; align-items: baseline; gap: 12px; }
+  .title { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; }
+  .title-sub { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .meta-tag {
+    font-size: 9.5px; color: var(--text-mute);
+    text-transform: uppercase; letter-spacing: 1.8px; font-weight: 700;
+    padding: 5px 10px; background: var(--frame);
+    border: 1px solid var(--border); border-radius: 3px;
+  }
+  .generated {
+    font-size: 9.5px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 1.8px; font-weight: 700;
+  }
+
+  /* ──────── REFRESH BUTTON + TOAST ──────── */
+  .refresh-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 11px;
+    background: var(--frame);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: inherit; font-size: 10px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.32); }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-icon { font-size: 13px; line-height: 1; }
+  .toast {
+    position: fixed; top: 24px; left: 50%;
+    transform: translateX(-50%) translateY(-12px);
+    background: var(--frame); color: var(--text);
+    border: 1px solid var(--accent); border-radius: 4px;
+    padding: 10px 18px; font-size: 12px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast code { color: var(--accent); font-family: inherit; margin-left: 6px; }
+
+  /* ──────── SUMMARY STRIP ──────── */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-radius: 4px;
+    margin-bottom: 18px;
+    overflow: hidden;
+  }
+  .sum-cell {
+    background: var(--frame);
+    padding: 10px 14px;
+  }
+  .sum-label {
+    font-size: 9px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+  .sum-value {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Grade summary cells — amber/neutral. Green reserved for +/− / calls. */
+  .sum-value.a-grade { color: var(--accent); }
+  .sum-value.b-grade { color: var(--text); }
+  .sum-value.c-grade { color: var(--accent); }
+  .sum-value.skip   { color: var(--text-mute); }
+
+  /* ──────── TABLE ──────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    background: var(--frame);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  thead th {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-weight: 700;
+    text-align: right;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--frame-2);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+  }
+  thead th:hover { background: rgba(255,255,255,0.04); }
+  thead th.left { text-align: left; }
+  thead th.sort-arrow::after { content: ' ↕'; opacity: 0.4; font-size: 8px; }
+  thead th.sort-asc::after  { content: ' ↑'; opacity: 1.0; color: var(--accent); }
+  thead th.sort-desc::after { content: ' ↓'; opacity: 1.0; color: var(--accent); }
+  tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-size: 12px;
+    text-align: right;
+  }
+  tbody td.left { text-align: left; }
+  tbody tr { transition: background 0.1s; }
+  tbody tr:hover td { background: rgba(255,255,255,0.02); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* Grade pill */
+  .grade {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    padding: 3px 9px;
+    border-radius: 3px;
+    text-align: center;
+    min-width: 26px;
+  }
+  /* Grade pills — neutral palette. Quality of setup is direction-agnostic;
+     green/red reserved for +/− / calls / puts. */
+  .grade.A { background: rgba(251,191,36,0.20); color: #fde047; border: 1px solid rgba(251,191,36,0.55); font-weight: 900; }
+  .grade.B { background: rgba(255,255,255,0.10); color: var(--text); border: 1px solid rgba(255,255,255,0.32); }
+  .grade.C { background: rgba(251,191,36,0.12); color: var(--accent); border: 1px solid rgba(251,191,36,0.32); }
+  .grade.D { background: rgba(124,58,237,0.12); color: #c4b5fd; border: 1px solid rgba(124,58,237,0.32); }
+  .grade.F { background: rgba(255,255,255,0.04); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.1); }
+
+  /* Direction arrows */
+  .dir-up   { color: hsl(var(--pos-hue), 85%, 60%); font-weight: 900; }
+  .dir-down { color: hsl(var(--neg-hue), 85%, 60%); font-weight: 900; }
+
+  /* Ticker link */
+  .ticker {
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: -0.2px;
+  }
+  .ticker a {
+    color: var(--text);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-dim);
+  }
+  .ticker a:hover { border-bottom-color: var(--text); }
+  .ticker-name {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-left: 4px;
+  }
+
+  /* Velocity flag */
+  .velocity {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .velocity.hot {
+    color: var(--accent);
+  }
+  .velocity.cool {
+    color: var(--text-mute);
+  }
+  .vel-icon { font-size: 11px; }
+
+  /* Status row (no-eow / unscorable / error) */
+  tr.skipped td { opacity: 0.55; }
+  .status-tag {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.04);
+    color: var(--text-mute);
+  }
+
+  /* Regime badge */
+  .regime-pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .regime-pill.positive { background: hsla(var(--pos-hue), 70%, 20%, 0.6); color: hsl(var(--pos-hue), 90%, 70%); }
+  .regime-pill.negative { background: hsla(var(--neg-hue), 70%, 20%, 0.6); color: hsl(var(--neg-hue), 90%, 70%); }
+
+  /* Footer copy */
+  .footnote {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-mute);
+    line-height: 1.6;
+  }
+  .footnote strong { color: var(--text); font-weight: 700; }
+  .footnote code {
+    background: rgba(255,255,255,0.05);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="nav-brand">γ Gamma</span>
+    <div class="nav-links">
+      <a href="gamma-heatmap-multi.html" class="nav-link">Cross-Asset</a>
+      <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
+      <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
+      <a href="screener.html" class="nav-link">Flow Screener</a>
+      <a href="scan.html" class="nav-link active">EOW Scan</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <span class="title">EOW Asymmetric Scan</span>
+      <span class="title-sub" id="title-sub">WSB Top-N · Asymmetric Breakout</span>
+    </div>
+    <div class="header-right">
+      <span class="meta-tag" id="filter-tag"></span>
+      <span class="generated" id="generated"></span>
+      <button class="refresh-btn" id="refresh-btn" type="button"
+              data-cmd="python3 scripts/scan-eow.py"
+              title="Copy refresh command to clipboard">
+        <span class="refresh-icon">↻</span><span>Refresh</span>
+      </button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <div class="summary" id="summary"></div>
+
+  <div id="table-body"></div>
+
+  <div class="footnote">
+    <strong>How to read this:</strong> tickers come from ApeWisdom's WSB top-N
+    list (live). For each, we pull the EOW (this-Friday) options chain from
+    Unusual Whales, derive gamma levels with the same proximity filters used
+    on the heatmaps, and score on an <strong>asymmetric-breakout rubric</strong>:
+    <code>asymmetry × regime alignment × mention velocity</code>.
+    <br><br>
+    Higher score means: one structural side is far wider than the other (the
+    target), the gamma regime aligns with that direction, and Reddit attention
+    is building. Score is deterministic — same data always yields the same
+    grade.
+    <br><br>
+    <strong>Status meanings:</strong>
+    <code>no-eow</code> = ticker has no Friday option chain (small caps, ADRs);
+    <code>unscorable</code> = no structural anchors (no walls or put magnet within
+    proximity bands);
+    <code>error</code> = UW pull failed (retry).
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG — refresh script rewrites this block
+// ═══════════════════════════════════════════════════
+const CONFIG = {
+  asOf: '',
+  topN: 25,
+  targetDate: '',
+  scanned: [],
+};
+
+function fmtPrice(v) {
+  if (v == null) return '—';
+  return '$' + (Number(v) % 1 === 0 ? v : Number(v).toFixed(2));
+}
+function fmtPct(v) {
+  if (v == null) return '—';
+  return (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+}
+function fmtNum(v) {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+  return String(Math.round(n));
+}
+
+function renderRow(r) {
+  // Status row (no-eow, unscorable, error) — render minimal
+  if (r.grade == null) {
+    const statusLabel = ({
+      'no-eow':     'no EOW chain',
+      'unscorable': 'no anchors',
+      'pull-failed':'UW failed',
+      'no-data':    'no data',
+      'error':      'error',
+    })[r.status] || r.status || '—';
+    return `
+      <tr class="skipped" data-grade="" data-score="-1" data-ticker="${r.ticker}">
+        <td>${r.rank}</td>
+        <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${r.ticker}" target="_blank">${r.ticker}</a><span class="ticker-name">${r.name || ''}</span></span></td>
+        <td><span class="status-tag">${statusLabel}</span></td>
+        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+        <td>${fmtNum(r.mentions)}</td>
+        <td>—</td>
+      </tr>`;
+  }
+  // Scored row
+  const arrowClass = r.direction === 'up' ? 'dir-up' : 'dir-down';
+  const arrow = r.direction === 'up' ? '↑' : '↓';
+  const regimePill = r.regime ? `<span class="regime-pill ${r.regime}">${r.regime === 'positive' ? 'Pos' : 'Neg'}</span>` : '—';
+  const velClass = r.velocity_score >= 0.5 ? 'hot' : 'cool';
+  const velIcon = r.velocity_score >= 0.7 ? '🔥' : (r.velocity_score >= 0.3 ? '↑' : '·');
+  const rankDelta = (r.rank_24h && r.rank_24h !== r.rank) ? (r.rank_24h - r.rank) : 0;
+  const rankNote = rankDelta > 0 ? `<span style="color:var(--text-dim);font-size:10px;"> +${rankDelta}</span>` : '';
+
+  return `
+    <tr data-grade="${r.grade}" data-score="${r.score}" data-ticker="${r.ticker}">
+      <td>${r.rank}${rankNote}</td>
+      <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${r.ticker}" target="_blank">${r.ticker}</a><span class="ticker-name">${r.name || ''}</span></span></td>
+      <td><span class="grade ${r.grade}">${r.grade}</span></td>
+      <td><span class="${arrowClass}">${arrow}</span></td>
+      <td>${fmtPrice(r.price)}</td>
+      <td>${fmtPrice(r.target_price)}</td>
+      <td>${fmtPct(r.gap_pct)}</td>
+      <td>${regimePill}</td>
+      <td>${fmtNum(r.mentions)}</td>
+      <td><span class="velocity ${velClass}"><span class="vel-icon">${velIcon}</span>${(r.velocity_score * 100).toFixed(0)}</span></td>
+    </tr>
+  `;
+}
+
+function renderSummary(scanned) {
+  const counts = { A: 0, B: 0, C: 0, D: 0, F: 0, skip: 0 };
+  for (const r of scanned) {
+    if (r.grade) counts[r.grade] = (counts[r.grade] || 0) + 1;
+    else counts.skip++;
+  }
+  const cells = [
+    { label: 'Grade A', value: counts.A, cls: 'a-grade' },
+    { label: 'Grade B', value: counts.B, cls: 'b-grade' },
+    { label: 'Grade C', value: counts.C, cls: 'c-grade' },
+    { label: 'D / F',   value: counts.D + counts.F },
+    { label: 'No data', value: counts.skip,  cls: 'skip' },
+  ];
+  document.getElementById('summary').innerHTML = cells.map(c => `
+    <div class="sum-cell">
+      <div class="sum-label">${c.label}</div>
+      <div class="sum-value ${c.cls || ''}">${c.value}</div>
+    </div>
+  `).join('');
+}
+
+function renderTable(scanned) {
+  const rows = scanned.map(renderRow).join('');
+  document.getElementById('table-body').innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="rank" class="sort-arrow">Rank</th>
+          <th data-sort="ticker" class="left sort-arrow">Ticker</th>
+          <th data-sort="grade" class="sort-desc">Grade</th>
+          <th data-sort="direction" class="sort-arrow">Dir</th>
+          <th data-sort="price" class="sort-arrow">Price</th>
+          <th data-sort="target_price" class="sort-arrow">Target</th>
+          <th data-sort="gap_pct" class="sort-arrow">Gap</th>
+          <th data-sort="regime" class="sort-arrow">Regime</th>
+          <th data-sort="mentions" class="sort-arrow">Mentions</th>
+          <th data-sort="velocity_score" class="sort-arrow">Velocity</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">${rows}</tbody>
+    </table>`;
+}
+
+function render(cfg) {
+  document.title = `EOW Scan · ${cfg.targetDate || 'pending'}`;
+  document.getElementById('title-sub').textContent = `WSB Top ${cfg.topN} · Asymmetric Breakout`;
+  document.getElementById('filter-tag').textContent = `EOW ${cfg.targetDate || ''}`;
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2,'0');
+    document.getElementById('generated').textContent =
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
+  }
+  renderSummary(cfg.scanned || []);
+  renderTable(cfg.scanned || []);
+}
+
+// Sortable columns
+document.addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (th) {
+    const col = th.getAttribute('data-sort');
+    const tbody = document.getElementById('tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const ascending = !th.classList.contains('sort-desc');
+    // Reset other headers
+    th.parentElement.querySelectorAll('th').forEach(h => {
+      h.classList.remove('sort-asc', 'sort-desc');
+      h.classList.add('sort-arrow');
+    });
+    th.classList.remove('sort-arrow');
+    th.classList.add(ascending ? 'sort-desc' : 'sort-asc');
+    // Sort rows
+    rows.sort((a, b) => {
+      let av, bv;
+      if (col === 'grade') {
+        const order = {A:0, B:1, C:2, D:3, F:4, '':5};
+        av = order[a.dataset.grade] ?? 9;
+        bv = order[b.dataset.grade] ?? 9;
+      } else {
+        // Read from cell text — fall back to data-score
+        av = a.querySelector(`td:nth-child(${[...th.parentElement.children].indexOf(th) + 1})`)?.textContent;
+        bv = b.querySelector(`td:nth-child(${[...th.parentElement.children].indexOf(th) + 1})`)?.textContent;
+        const an = parseFloat((av || '').replace(/[^0-9.\-]/g, ''));
+        const bn = parseFloat((bv || '').replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(an) && !isNaN(bn)) { av = an; bv = bn; }
+      }
+      if (av < bv) return ascending ? 1 : -1;
+      if (av > bv) return ascending ? -1 : 1;
+      return 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    return;
+  }
+
+  // Refresh button — clipboard + toast
+  const btn = e.target.closest('.refresh-btn');
+  if (!btn) return;
+  const cmd = btn.getAttribute('data-cmd') || '';
+  const toast = document.getElementById('toast');
+  const ok = () => {
+    if (!toast) return;
+    toast.innerHTML = `Copied — paste in terminal:<code>${cmd}</code>`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2400);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = cmd;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(ok).catch(() => { fallback(); ok(); });
+  } else { fallback(); ok(); }
+});
+
+render(CONFIG);
+</script>
+</body>
+</html>

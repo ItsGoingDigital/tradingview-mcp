@@ -58,6 +58,21 @@ register('data', {
       },
       handler: (opts) => core.getPineBoxes({ study_filter: opts.filter, verbose: opts.verbose }),
     }],
+    ['structure-zones', {
+      description: 'BOS/ChoCh zones from Market Structure (Fractal). Pairs solid+dashed lines, derives direction, returns upper/lower bounds per zone',
+      options: {
+        filter: { type: 'string', short: 'f', description: 'Filter by study name (default "Market Structure")' },
+        within: { type: 'string', short: 'w', description: 'Filter to zones within N points of current price' },
+        price: { type: 'string', short: 'p', description: 'Override current price (default reads from chart)' },
+        'include-mitigated': { type: 'boolean', description: 'Include mitigated zones (default: only unmitigated)' },
+      },
+      handler: (opts) => core.getStructureZones({
+        study_filter: opts.filter,
+        within_points: opts.within ? Number(opts.within) : undefined,
+        current_price: opts.price ? Number(opts.price) : undefined,
+        include_mitigated: opts['include-mitigated'],
+      }),
+    }],
     ['strategy', {
       description: 'Get strategy performance metrics',
       handler: () => core.getStrategyResults(),

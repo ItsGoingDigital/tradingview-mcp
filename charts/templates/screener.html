@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Unusual Flow Screener · This Week DTE</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --frame: #131313;
+    --frame-2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --text: #f0f0f0;
+    --text-mute: #8a8a8a;
+    --text-dim: #4a4a4a;
+    --accent: #fbbf24;
+    --pos-hue: 130;
+    --neg-hue: 355;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    padding: 64px 24px 40px;   /* top padding clears the fixed navbar */
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    line-height: 1.4;
+  }
+  .container { width: 100%; max-width: 1320px; }
+
+  /* ──────── NAVBAR — shared across all heatmap pages ──────── */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--frame);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 24px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  .nav-inner {
+    max-width: 1620px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .nav-brand {
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: -0.3px;
+    color: var(--accent);
+  }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link {
+    color: var(--text-mute);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    padding: 5px 11px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-link:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+  }
+  .nav-link.active {
+    color: var(--accent);
+    background: rgba(251,191,36,0.08);
+    border-color: rgba(251,191,36,0.32);
+  }
+
+  /* ──────── HEADER ──────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header-left { display: flex; align-items: baseline; gap: 12px; }
+  .title {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+  }
+  .title-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .meta-tag {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    padding: 5px 10px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .generated {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+  }
+
+  /* ──────── SECTIONS ──────── */
+  .section {
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .section-head {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-head.calls { background: hsla(var(--pos-hue), 50%, 12%, 0.4); }
+  .section-head.puts  { background: hsla(var(--neg-hue), 50%, 12%, 0.4); }
+  .section-label {
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .section-label.calls { color: hsl(var(--pos-hue), 95%, 70%); }
+  .section-label.puts  { color: hsl(var(--neg-hue), 95%, 70%); }
+  .section-count {
+    font-size: 10px;
+    color: var(--text-mute);
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+  }
+  .empty {
+    padding: 20px 24px;
+    color: var(--text-mute);
+    font-size: 12px;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* ──────── TABLE ──────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  thead th {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-weight: 700;
+    text-align: right;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--frame-2);
+  }
+  thead th.left { text-align: left; }
+  tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-size: 12px;
+    text-align: right;
+  }
+  tbody td.left { text-align: left; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .ticker {
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: -0.2px;
+  }
+  .ticker a {
+    color: var(--text);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-dim);
+  }
+  .ticker a:hover { border-bottom-color: var(--text); }
+  .contract {
+    font-weight: 700;
+    color: var(--text);
+  }
+  .contract .ctype.C { color: hsl(var(--pos-hue), 85%, 60%); margin-right: 2px; }
+  .contract .ctype.P { color: hsl(var(--neg-hue), 85%, 60%); margin-right: 2px; }
+  .moneyness { color: var(--text-mute); font-size: 10.5px; }
+  .premium {
+    font-weight: 700;
+    color: var(--text);
+  }
+  .premium.huge { color: var(--accent); }
+  .vol-oi {
+    color: var(--text-mute);
+    font-size: 10.5px;
+  }
+  .ask-perc { font-weight: 600; }
+  .ask-perc.hot { color: hsl(var(--pos-hue), 90%, 65%); }
+  .ask-perc.cold { color: hsl(var(--neg-hue), 90%, 65%); }
+  .section.puts .ask-perc.hot { color: hsl(var(--neg-hue), 90%, 65%); }
+  .badges {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .badge {
+    font-size: 8.5px;
+    letter-spacing: 1px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-mute);
+  }
+  .badge.sweep { background: rgba(251,191,36,0.12); color: var(--accent); }
+  .badge.earnings { background: rgba(124,58,237,0.15); color: #c4b5fd; }
+  /* 0DTE is an urgency flag, not a put/decrease signal — amber, not red */
+  .badge.dte0 { background: rgba(251,191,36,0.15); color: var(--accent); }
+  .badge.sector { background: rgba(255,255,255,0.04); color: var(--text-mute); }
+  .time-cell {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .spot { color: var(--text-mute); font-size: 11px; }
+  .strike { font-weight: 700; }
+
+  /* Refresh button (mirrors the gamma heatmaps) */
+  .refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    background: var(--frame);
+    border: 1px solid var(--border-strong, rgba(255,255,255,0.15));
+    border-radius: 3px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.32); }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-icon { font-size: 13px; line-height: 1; }
+  .toast {
+    position: fixed; top: 24px; left: 50%;
+    transform: translateX(-50%) translateY(-12px);
+    background: var(--frame); color: var(--text);
+    border: 1px solid var(--accent); border-radius: 4px;
+    padding: 10px 18px; font-size: 12px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast code { color: var(--accent); font-family: inherit; margin-left: 6px; }
+
+  /* URGENT flag — calls attention to contracts hitting ≥3 of the high-conviction
+     thresholds (premium ≥ $1M, vol/OI ≥ 10×, ask ≥ 85%, sweep, DTE ≤ 1).
+     Calls and puts use the same shape but with their tribe's color. */
+  .urgent {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-radius: 3px;
+    color: #fff;
+    margin-left: 4px;
+    animation: urgent-pulse 1.6s ease-in-out infinite;
+  }
+  .urgent.calls {
+    background: hsl(var(--pos-hue), 70%, 35%);
+    box-shadow: 0 0 8px hsla(var(--pos-hue), 95%, 50%, 0.6);
+  }
+  .urgent.puts {
+    background: hsl(var(--neg-hue), 70%, 35%);
+    box-shadow: 0 0 8px hsla(var(--neg-hue), 95%, 50%, 0.6);
+  }
+  @keyframes urgent-pulse {
+    0%, 100% { opacity: 1.0; transform: scale(1.0); }
+    50%      { opacity: 0.85; transform: scale(1.04); }
+  }
+  /* Row tint when URGENT — subtle background bleed in the tribe's color */
+  tr.urgent-row.calls td { background: hsla(var(--pos-hue), 70%, 12%, 0.4); }
+  tr.urgent-row.puts  td { background: hsla(var(--neg-hue), 70%, 12%, 0.4); }
+  tr.urgent-row:hover td { background: hsla(var(--pos-hue), 70%, 18%, 0.5); }
+  tr.urgent-row.puts:hover td { background: hsla(var(--neg-hue), 70%, 18%, 0.5); }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="nav-brand">γ Gamma</span>
+    <div class="nav-links">
+      <a href="gamma-heatmap-multi.html" class="nav-link">Cross-Asset</a>
+      <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
+      <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
+      <a href="screener.html" class="nav-link active">Flow Screener</a>
+      <a href="scan.html" class="nav-link">EOW Scan</a>
+    </div>
+  </div>
+</nav>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <span class="title">Unusual Flow</span>
+      <span class="title-sub" id="title-sub">This Week DTE</span>
+    </div>
+    <div class="header-right">
+      <span class="meta-tag" id="filter-tag"></span>
+      <span class="generated" id="generated"></span>
+      <button class="refresh-btn" id="refresh-btn" type="button"
+              data-cmd="python3 scripts/refresh-screener.py"
+              title="Copy refresh command to clipboard">
+        <span class="refresh-icon">↻</span><span>Refresh</span>
+      </button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <div class="section">
+    <div class="section-head calls">
+      <span class="section-label calls">Bullish Calls</span>
+      <span class="section-count" id="calls-count"></span>
+    </div>
+    <div id="calls-body"></div>
+  </div>
+
+  <div class="section puts">
+    <div class="section-head puts">
+      <span class="section-label puts">Bearish Puts</span>
+      <span class="section-count" id="puts-count"></span>
+    </div>
+    <div id="puts-body"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG — refresh script rewrites this block
+// ═══════════════════════════════════════════════════
+const CONFIG = {
+  asOf: '',
+  filters: { max_dte: 3, min_premium: 100000, min_ask_perc: 0.65, min_volume: 500 },
+  calls: [],
+  puts: [],
+};
+
+function fmtMoney(v) {
+  if (v == null) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `$${(abs/1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000)     return `$${Math.round(abs/1000)}k`;
+  return `$${abs}`;
+}
+function fmtVol(v) {
+  if (v == null) return '—';
+  if (v >= 1_000_000) return `${(v/1_000_000).toFixed(1)}M`;
+  if (v >= 1_000)     return `${(v/1000).toFixed(1)}k`;
+  return `${v}`;
+}
+function fmtPct(v) {
+  if (v == null) return '—';
+  return `${Math.round(v * 100)}%`;
+}
+
+// URGENT detection — multi-factor "stop what you're doing and look at this" check.
+// Row qualifies when at least 3 of these thresholds hit. Deterministic, traceable.
+function urgentInfo(row) {
+  const volOi = row.oi > 0 ? row.volume / row.oi : (row.volume > 0 ? 999 : 0);
+  const checks = [
+    { name: 'prem≥$1M',    pass: row.premium >= 1_000_000 },
+    { name: 'vol/OI≥10×',  pass: volOi >= 10 },
+    { name: 'ask≥85%',     pass: row.ask_perc >= 0.85 },
+    { name: 'sweep',       pass: !!row.sweep },
+    { name: 'DTE≤1',       pass: row.dte <= 1 },
+  ];
+  const passed = checks.filter(c => c.pass);
+  return { isUrgent: passed.length >= 3, reasons: passed.map(c => c.name), passedCount: passed.length };
+}
+
+function renderRow(row, side) {
+  const moneyness = ((row.strike - row.spot) / row.spot * 100);
+  const moneynessStr = `${moneyness >= 0 ? '+' : ''}${moneyness.toFixed(1)}%`;
+  const dte = row.dte;
+  const dteStr = dte === 0 ? '0DTE' : `${dte}d`;
+  const askPercClass = row.ask_perc >= 0.80 ? 'hot' : (row.ask_perc >= 0.65 ? 'hot' : 'cold');
+  const premHuge = row.premium >= 1_000_000;
+  const urg = urgentInfo(row);
+
+  const badges = [];
+  if (urg.isUrgent) {
+    const tooltip = `Hit ${urg.passedCount}/5: ${urg.reasons.join(', ')}`;
+    badges.push(`<span class="urgent ${side}" title="${tooltip}">⚡ Urgent</span>`);
+  }
+  if (dte === 0) badges.push(`<span class="badge dte0">0DTE</span>`);
+  if (row.sweep) badges.push(`<span class="badge sweep">SWEEP</span>`);
+  if (row.earnings_soon) badges.push(`<span class="badge earnings">EARN ${row.earnings_soon}</span>`);
+  if (row.sector) badges.push(`<span class="badge sector">${row.sector}</span>`);
+
+  const rowClass = urg.isUrgent ? `urgent-row ${side}` : '';
+
+  return `
+    <tr class="${rowClass}">
+      <td class="left">
+        <span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${row.ticker}" target="_blank">${row.ticker}</a></span>
+      </td>
+      <td class="left">
+        <span class="contract">
+          <span class="ctype ${row.type}">${row.type}</span><span class="strike">$${row.strike}</span>
+          <span class="moneyness"> · ${moneynessStr} · ${dteStr}</span>
+        </span>
+      </td>
+      <td><span class="spot">$${row.spot.toFixed(2)}</span></td>
+      <td><span class="premium ${premHuge ? 'huge' : ''}">${fmtMoney(row.premium)}</span></td>
+      <td>${fmtVol(row.volume)} <span class="vol-oi">/ ${fmtVol(row.oi)} oi</span></td>
+      <td><span class="ask-perc ${askPercClass}">${fmtPct(row.ask_perc)}</span></td>
+      <td class="left"><span class="badges">${badges.join('')}</span></td>
+      <td><span class="time-cell">${row.last_fill || ''}</span></td>
+    </tr>
+  `;
+}
+
+function renderSection(rows, bodyId, countId, side) {
+  document.getElementById(countId).textContent = `${rows.length} contracts`;
+  const body = document.getElementById(bodyId);
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty">No prints match the current filters.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Ticker</th>
+          <th class="left">Contract</th>
+          <th>Spot</th>
+          <th>Premium</th>
+          <th>Vol / OI</th>
+          <th>Ask %</th>
+          <th class="left">Flags</th>
+          <th>Last fill</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => renderRow(r, side)).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function render(cfg) {
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('generated').textContent =
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
+  }
+  const f = cfg.filters || {};
+  document.getElementById('filter-tag').textContent =
+    `≤${f.max_dte}d · prem≥${fmtMoney(f.min_premium)} · vol≥${fmtVol(f.min_volume)} · ask≥${fmtPct(f.min_ask_perc)}`;
+  renderSection(cfg.calls || [], 'calls-body', 'calls-count', 'calls');
+  renderSection(cfg.puts || [], 'puts-body', 'puts-count', 'puts');
+}
+
+render(CONFIG);
+
+// Refresh button — clipboard + toast (mirrors gamma heatmap pattern)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.refresh-btn');
+  if (!btn) return;
+  const cmd = btn.getAttribute('data-cmd') || '';
+  const toast = document.getElementById('toast');
+  const ok = () => {
+    if (!toast) return;
+    toast.innerHTML = `Copied — paste in terminal:<code>${cmd}</code>`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2400);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = cmd;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(ok).catch(() => { fallback(); ok(); });
+  } else {
+    fallback(); ok();
+  }
+});
+</script>
+</body>
+</html>

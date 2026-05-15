@@ -1,0 +1,1667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Gamma · Cross-Expiry · SPX/SPY/QQQ</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --frame: #131313;
+    --frame-2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --text: #f0f0f0;
+    --text-mute: #8a8a8a;
+    --text-dim: #4a4a4a;
+    --accent: #fbbf24;
+    --accent-soft: rgba(251,191,36,0.15);
+    --pos-hue: 130;
+    --neg-hue: 355;
+    --row-h: 16px;
+    --label-col: 58px;
+    --value-col: 78px;
+    --col-width: 500px;
+    --heatmap-max-h: 640px;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    color: var(--text);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    padding: 64px 24px 40px;   /* top padding clears the fixed navbar (~40px) */
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    line-height: 1.4;
+  }
+
+  /* ──────── NAVBAR — shared across all heatmap pages ──────── */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--frame);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 24px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  .nav-inner {
+    max-width: 1620px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .nav-brand {
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: -0.3px;
+    color: var(--accent);
+  }
+  .nav-links {
+    display: flex;
+    gap: 4px;
+  }
+  .nav-link {
+    color: var(--text-mute);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    padding: 5px 11px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-link:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+  }
+  .nav-link.active {
+    color: var(--accent);
+    background: rgba(251,191,36,0.08);
+    border-color: rgba(251,191,36,0.32);
+  }
+  .container {
+    width: 100%;
+    max-width: calc(var(--col-width) * 3 + 48px);
+  }
+
+  /* ──────── TOP STRIP — confluence + meta ──────── */
+  .top-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .top-left {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .title {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+  }
+  .title-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .confluence-ribbon {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+  }
+  .confluence-ribbon.aligned-pos {
+    background: hsla(var(--pos-hue), 70%, 20%, 0.6);
+    color: hsl(var(--pos-hue), 90%, 70%);
+    border: 1px solid hsla(var(--pos-hue), 80%, 50%, 0.5);
+  }
+  .confluence-ribbon.aligned-neg {
+    background: hsla(var(--neg-hue), 70%, 20%, 0.6);
+    color: hsl(var(--neg-hue), 90%, 70%);
+    border: 1px solid hsla(var(--neg-hue), 80%, 50%, 0.5);
+  }
+  .confluence-ribbon.mixed {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--accent);
+    border: 1px solid rgba(251, 191, 36, 0.45);
+  }
+  .confluence-ribbon.diverging {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .ribbon-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: ribbon-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes ribbon-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+  }
+  .generated {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+  }
+
+  /* Refresh button — copies the python command to clipboard */
+  .refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    background: var(--frame);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .refresh-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.32);
+  }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-icon { font-size: 13px; line-height: 1; }
+  /* Toast popup */
+  .toast {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-12px);
+    background: var(--frame);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 10px 18px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 100;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast code {
+    color: var(--accent);
+    font-family: inherit;
+    margin-left: 6px;
+  }
+  .expiry-tag {
+    font-size: 9.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    padding: 5px 10px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+
+  /* ──────── COLUMN GRID ──────── */
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .column {
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Column header */
+  .col-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .col-ticker {
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: -0.4px;
+  }
+  .col-name {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .col-head-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .regime-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+  }
+  /* Regime: neutral (white/gray) — regime is about gamma sign, not direction.
+     Color reserved for direction-bearing elements (calls/puts/+/−). */
+  .regime-badge.positive {
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,0.28);
+  }
+  .regime-badge.negative {
+    background: rgba(255,255,255,0.03);
+    color: var(--text-mute);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-style: dashed;
+  }
+  .regime-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: ribbon-pulse 1.6s ease-in-out infinite;
+  }
+
+  .col-subtitle {
+    color: var(--text-mute);
+    font-size: 11.5px;
+    font-weight: 400;
+  }
+  .col-subtitle strong { color: var(--text); font-weight: 700; }
+
+  /* Stats — 4-cell strip: Current (featured) | Pin | Walls (stacked ↑/↓) | Put Mag */
+  .stats {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .stat {
+    background: var(--frame-2);
+    padding: 8px 9px;
+  }
+  /* Stacked walls — Wall ↑ on top half, Wall ↓ on bottom, same column width */
+  .stat-walls {
+    background: var(--frame-2);
+    display: flex;
+    flex-direction: column;
+  }
+  .wall-half {
+    flex: 1;
+    padding: 6px 9px;
+  }
+  .wall-half + .wall-half {
+    border-top: 1px solid var(--border);
+  }
+  .wall-half .stat-label { margin-bottom: 1px; }
+  .stat-asof {
+    font-size: 8.5px;
+    color: var(--text-dim);
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-label {
+    font-size: 8.5px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .stat-value {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.2px;
+  }
+  .stat-sub {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-top: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-value.pos { color: hsl(var(--pos-hue), 85%, 58%); }
+  .stat-value.neg { color: hsl(var(--neg-hue), 85%, 58%); }
+  .stat-value.wall-clr { color: var(--accent); }
+  /* Sub-line magnitudes are direction-bearing (+/−), so color them per sign */
+  .stat-sub.pos { color: hsl(var(--pos-hue), 70%, 55%); }
+  .stat-sub.neg { color: hsl(var(--neg-hue), 70%, 55%); }
+  /* Current Price — featured cell, larger + amber for eye-priority */
+  .stat-value.current {
+    color: var(--accent);
+    font-size: 17px;
+    letter-spacing: -0.3px;
+  }
+  .stat:has(.stat-value.current) {
+    background: linear-gradient(180deg, rgba(251,191,36,0.06), var(--frame-2));
+    border-right: 1px solid rgba(251,191,36,0.18);
+  }
+
+  /* ──────── SESSION RANGE — tiny recessed strip under stats ──────── */
+  .session-range {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px 2px;
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .session-range .sr-label { color: var(--text-mute); }
+  .session-range .sr-lo,
+  .session-range .sr-hi { color: var(--text); font-weight: 700; }
+  .session-range .sr-bar {
+    position: relative;
+    flex: 1;
+    height: 2px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 1px;
+    margin: 0 4px;
+  }
+  .session-range .sr-bar-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(255,255,255,0.18);
+    border-radius: 1px;
+  }
+  .session-range .sr-now {
+    position: absolute;
+    top: -2px; bottom: -2px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .session-range .sr-span { color: var(--text-mute); }
+
+  /* ──────── HEATMAP — scrollable per column ──────── */
+  .heatmap-wrap {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: #000;
+  }
+  .heatmap-frame {
+    max-height: var(--heatmap-max-h);
+    overflow-y: auto;
+    position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.18) transparent;
+  }
+  .heatmap-frame::-webkit-scrollbar { width: 6px; }
+  .heatmap-frame::-webkit-scrollbar-track { background: transparent; }
+  .heatmap-frame::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.18);
+    border-radius: 3px;
+  }
+  .heatmap-inner {
+    position: relative;
+  }
+  .strike-row {
+    display: grid;
+    grid-template-columns: var(--label-col) 1fr var(--value-col);
+    align-items: stretch;
+    height: var(--row-h);
+  }
+  .strike-label {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-align: right;
+    padding: 0 8px 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .strike-label.major {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .heat-cell {
+    height: 100%;
+    width: 100%;
+    position: relative;
+  }
+  .heat-cell.wall::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #fde68a 0px,
+      #fde68a 4px,
+      transparent 4px,
+      transparent 9px
+    );
+    pointer-events: none;
+  }
+  .heat-cell.wall::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-top: 1.5px solid var(--accent);
+    border-bottom: 1.5px solid var(--accent);
+    pointer-events: none;
+  }
+  .heat-cell.blocked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgba(0,0,0,0.55) 0px,
+      rgba(0,0,0,0.55) 1px,
+      transparent 1px,
+      transparent 5px
+    );
+    pointer-events: none;
+  }
+  .gex-value {
+    color: var(--text-dim);
+    font-size: 10px;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .gex-value.peak-pos { color: hsl(var(--pos-hue), 90%, 60%); font-weight: 700; }
+  .gex-value.peak-neg { color: hsl(var(--neg-hue), 90%, 60%); font-weight: 700; }
+  .gex-value.significant { color: var(--text); }
+  .gex-value.wall-tag {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  /* When the peak strike has bright-yellow dominance (score ≥ 0.8), match
+     the star — bold yellow text. Overrides peak-pos / peak-neg / etc. */
+  .gex-value.peak-bright {
+    color: #fde047 !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 6px rgba(253, 224, 71, 0.45);
+  }
+  .peak-star {
+    /* Color, font-size, opacity, glow set inline by peakStarHtml() */
+    display: inline-block;
+    margin-left: 4px;
+    line-height: 1;
+    cursor: help;
+  }
+
+  /* Price line */
+  .price-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px solid var(--accent);
+    z-index: 10;
+    pointer-events: none;
+  }
+  .price-line::before, .price-line::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    width: 0; height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+  }
+  .price-line::before { left: -1px; border-left: 5px solid var(--accent); }
+  .price-line::after  { right: -1px; border-right: 5px solid var(--accent); }
+
+  /* Flip line */
+  .flip-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1px dashed rgba(255, 255, 255, 0.55);
+    z-index: 9;
+    pointer-events: none;
+  }
+  .flip-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.75);
+    background: #000;
+    padding: 2px 5px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* POC line — amber dotted, structural memory level from Volume Profile */
+  .poc-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px dotted var(--accent);
+    z-index: 8;
+    pointer-events: none;
+  }
+  .poc-marker {
+    position: absolute;
+    left: 4px;
+    top: -10px;
+    font-size: 9px;
+    color: var(--accent);
+    background: #000;
+    padding: 2px 5px;
+    border: 1px solid rgba(251,191,36,0.5);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* Strat target — solid magenta line + label with the matched pattern.
+     One line per ticker, rendered only when stratSetup is non-null. */
+  .strat-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1.5px solid #d946ef;
+    z-index: 8;
+    pointer-events: none;
+  }
+  .strat-marker {
+    position: absolute;
+    right: 4px;
+    top: -10px;
+    font-size: 9px;
+    color: #f0abfc;
+    background: #000;
+    padding: 2px 5px;
+    border: 1px solid rgba(217, 70, 239, 0.55);
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  /* Daily S&D zone rectangle — outlined box spanning upper-to-lower bounds */
+  .structure-zone {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    z-index: 7;
+    pointer-events: none;
+    border-radius: 2px;
+  }
+  .structure-zone-label {
+    position: absolute;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #000;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 1px 5px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .structure-zone-label.top    { top: -9px; }
+  .structure-zone-label.bottom { bottom: -9px; }
+
+  /* Legacy single-line struct rendering (unused now) — kept for class compat */
+  .structure-line {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: 0;
+    border-top: 1px dashed;
+    z-index: 7;
+    pointer-events: none;
+    opacity: 0.85;
+  }
+  .structure-line.choch { border-top-color: #f97316; }
+  .structure-line.bos   { border-top-color: rgba(226,232,240,0.6); }
+  .structure-marker {
+    position: absolute;
+    left: 4px;
+    top: -10px;
+    font-size: 8.5px;
+    background: #000;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .structure-line.choch .structure-marker { color: #fdba74; border: 1px solid rgba(249,115,22,0.5); }
+  .structure-line.bos   .structure-marker { color: rgba(226,232,240,0.85); border: 1px solid rgba(226,232,240,0.3); }
+
+  /* Confluence flags chip in per-column analysis */
+  .conf-flag {
+    display: inline-block;
+    font-size: 10.5px;
+    padding: 2px 7px;
+    margin: 1px 4px 1px 0;
+    border-radius: 3px;
+    background: rgba(251,191,36,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(251,191,36,0.35);
+    font-weight: 600;
+  }
+
+  .magnet-pulse {
+    position: absolute;
+    left: var(--label-col);
+    right: var(--value-col);
+    height: var(--row-h);
+    pointer-events: none;
+    z-index: 5;
+    animation: pulse-pos 2s ease-in-out infinite;
+  }
+  .magnet-pulse.neg { animation: pulse-neg 2.4s ease-in-out infinite; }
+  @keyframes pulse-pos {
+    0%, 100% { box-shadow: inset 0 0 0 1.5px hsl(var(--pos-hue), 95%, 65%), 0 0 12px 2px hsla(var(--pos-hue), 95%, 55%, 0.35); }
+    50%      { box-shadow: inset 0 0 0 1.5px hsl(var(--pos-hue), 95%, 80%), 0 0 24px 5px hsla(var(--pos-hue), 95%, 60%, 0.65); }
+  }
+  @keyframes pulse-neg {
+    0%, 100% { box-shadow: inset 0 0 0 1.5px hsl(var(--neg-hue), 95%, 65%), 0 0 12px 2px hsla(var(--neg-hue), 95%, 55%, 0.35); }
+    50%      { box-shadow: inset 0 0 0 1.5px hsl(var(--neg-hue), 95%, 80%), 0 0 24px 5px hsla(var(--neg-hue), 95%, 60%, 0.65); }
+  }
+
+  /* ──────── LEGEND ──────── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 10px 16px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-mute);
+    margin-bottom: 16px;
+    font-weight: 500;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .legend-swatch {
+    width: 22px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .legend-swatch.pos { background: linear-gradient(90deg, hsl(130, 95%, 6%), hsl(130, 95%, 50%)); }
+  .legend-swatch.neg { background: linear-gradient(90deg, hsl(355, 95%, 6%), hsl(355, 95%, 50%)); }
+  .legend-swatch.dead { background: #000; outline: 1px solid var(--border); outline-offset: -1px; }
+  .legend-swatch.wall {
+    background:
+      repeating-linear-gradient(-45deg,
+        #fde68a 0px,
+        #fde68a 3px,
+        #b45309 3px,
+        #b45309 6px);
+  }
+  .legend-price {
+    width: 22px;
+    height: 0;
+    border-top: 1.5px solid var(--accent);
+  }
+
+  /* ──────── ANALYSIS — full-width, spans all columns ──────── */
+  .analysis {
+    padding: 18px 22px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .analysis .section {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .analysis .section:last-child { border-bottom: none; padding-bottom: 0; }
+  .analysis .section:first-child { padding-top: 0; }
+  .analysis .label {
+    color: var(--text-mute);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 5px;
+  }
+  .analysis .pos { color: hsl(var(--pos-hue), 90%, 60%); font-weight: 700; }
+  .analysis .neg { color: hsl(var(--neg-hue), 90%, 60%); font-weight: 700; }
+  .analysis .accent { color: hsl(var(--pos-hue), 100%, 70%); font-weight: 700; }
+  .analysis .mute  { color: var(--text-mute); }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="nav-brand">γ Gamma</span>
+    <div class="nav-links">
+      <a href="gamma-heatmap-multi.html" class="nav-link active">Cross-Asset</a>
+      <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
+      <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
+      <a href="screener.html" class="nav-link">Flow Screener</a>
+      <a href="scan.html" class="nav-link">EOW Scan</a>
+    </div>
+  </div>
+</nav>
+<div class="container">
+
+  <div class="top-strip">
+    <div class="top-left">
+      <span class="title">Live Gamma</span>
+      <span class="title-sub">Cross-Expiry · SPX · SPY · QQQ</span>
+    </div>
+    <div class="top-right">
+      <span class="confluence-ribbon" id="confluence-ribbon"></span>
+      <span class="expiry-tag" id="expiry-tag"></span>
+      <span class="generated" id="generated"></span>
+      <button class="refresh-btn" id="refresh-btn" type="button"
+              data-cmd="python3 scripts/refresh-multi-0dte.py"
+              title="Copy refresh command to clipboard">
+        <span class="refresh-icon">↻</span><span>Refresh</span>
+      </button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <div class="columns" id="columns"></div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch pos"></div>call magnet</div>
+    <div class="legend-item"><div class="legend-swatch neg"></div>put magnet</div>
+    <div class="legend-item"><div class="legend-swatch dead"></div>no weight</div>
+    <div class="legend-item"><div class="legend-swatch wall"></div>wall</div>
+    <div class="legend-item"><div class="legend-price"></div>price</div>
+  </div>
+
+  <div class="analysis" id="analysis"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG — refresh script rewrites this block
+// ═══════════════════════════════════════════════════
+const CONFIG = {
+  expiry: '2026-05-13',
+  expiryLabel: 'Aggregate · 5/13',
+  asOf: '2026-05-13T09:18:10.049931+00:00',
+  confluence: { verdict: 'ALIGNED ↑', tone: 'aligned-pos', note: 'All three above flip — positive-gamma compression regime. <span class="pos">SPX+</span> · <span class="pos">SPY+</span> · <span class="pos">QQQ+</span>. Dealers sell rallies, buy dips; expect mean-reversion around pin levels. Fade strength toward put magnets only if walls break.' },
+  analysisNote: 'Live pull · Unusual Whales · 05:18:10 local · sources [SPX: aggregate · SPY: aggregate · QQQ: aggregate] · snapshots persisted to Supabase.',
+  tickers: {
+    SPX: {
+      name: 'S&P 500',
+      currentPrice: 7400.97,
+      atmStrike: 7400,
+      gammaFlip: null,
+      regime: 'positive',
+      strikeRange: { low: 7120, high: 7505, step: 5 },
+      strikes: {
+      7505: 461,
+      7500: 14395,
+      7495: 383,
+      7490: 627,
+      7485: 356,
+      7480: 1493,
+      7475: 4520,
+      7470: 1441,
+      7465: 879,
+      7460: 1951,
+      7455: 586,
+      7450: 12033,
+      7445: 1429,
+      7440: 1542,
+      7435: 679,
+      7430: 3117,
+      7425: 6265,
+      7420: 3631,
+      7415: 2869,
+      7410: 2148,
+      7405: -1295,
+      7400: 13072,
+      7395: -260,
+      7390: -9,
+      7385: 136,
+      7380: -1090,
+      7375: 2258,
+      7370: -1326,
+      7365: -1001,
+      7360: 408,
+      7355: -1101,
+      7350: 1519,
+      7345: -1390,
+      7340: -167,
+      7335: -909,
+      7330: -562,
+      7325: 1723,
+      7320: -126,
+      7315: 40,
+      7310: 449,
+      7305: -656,
+      7300: 5422,
+      7295: -738,
+      7290: -744,
+      7285: -305,
+      7280: -254,
+      7275: 165,
+      7270: -377,
+      7265: -131,
+      7260: -399,
+      7255: -306,
+      7250: 854,
+      7245: -264,
+      7240: -454,
+      7235: 1,
+      7230: -577,
+      7225: 64,
+      7220: -119,
+      7215: -603,
+      7210: 417,
+      7205: -244,
+      7200: 53,
+      7195: -151,
+      7190: -296,
+      7185: -421,
+      7180: -518,
+      7175: -1526,
+      7170: -451,
+      7165: -388,
+      7160: -205,
+      7155: -259,
+      7150: -51,
+      7145: -90,
+      7140: -249,
+      7135: -174,
+      7130: 172,
+      7125: -499,
+      7120: -244
+      },
+    },
+    SPY: {
+      name: 'SPDR S&P 500 ETF',
+      currentPrice: 737.42,
+      atmStrike: 737,
+      gammaFlip: 691,
+      regime: 'positive',
+      strikeRange: { low: 709, high: 748, step: 1 },
+      strikes: {
+      748: 22413,
+      747: 24052,
+      746: 26908,
+      745: 177232,
+      744: 32227,
+      743: 34782,
+      742: 59317,
+      741: 49383,
+      740: 224188,
+      739: 35118,
+      738: 10680,
+      737: -90992,
+      736: -67187,
+      735: -98044,
+      734: -64300,
+      733: -18805,
+      732: -53797,
+      731: 8697,
+      730: -107573,
+      729: -37924,
+      728: -52400,
+      727: -50961,
+      726: -30685,
+      725: -96412,
+      724: -20777,
+      723: -19291,
+      722: -33698,
+      721: -11411,
+      720: -60140,
+      719: -19004,
+      718: -36207,
+      717: 5606,
+      716: -11752,
+      715: -77563,
+      714: -5139,
+      713: -5372,
+      712: -3692,
+      711: 4144,
+      710: -102807,
+      709: -17724
+      },
+    },
+    QQQ: {
+      name: 'Invesco QQQ Trust',
+      currentPrice: 706.0187,
+      atmStrike: 706,
+      gammaFlip: null,
+      regime: 'positive',
+      strikeRange: { low: 676, high: 719, step: 1 },
+      strikes: {
+      719: 8504,
+      718: 6928,
+      717: 7570,
+      716: 12285,
+      715: 96310,
+      714: 18637,
+      713: 5182,
+      712: -11496,
+      711: -8053,
+      710: 18811,
+      709: -26890,
+      708: -33400,
+      707: -17523,
+      706: -12543,
+      705: -49894,
+      704: -8952,
+      703: -12389,
+      702: -10177,
+      701: -28760,
+      700: -54501,
+      699: -9148,
+      698: -15503,
+      697: -8308,
+      696: -18930,
+      695: 9909,
+      694: -7781,
+      693: -8204,
+      692: -5304,
+      691: -6307,
+      690: -12341,
+      689: -2068,
+      688: 465,
+      687: -5689,
+      686: -2856,
+      685: 1360,
+      684: -18828,
+      683: -3893,
+      682: -22,
+      681: -243,
+      680: -2240,
+      679: -2745,
+      678: -2725,
+      677: -2665,
+      676: -1888
+      },
+    }
+  },
+};
+
+// ═══════════════════════════════════════════════════
+//  PURE FUNCTIONS — ticker-agnostic
+// ═══════════════════════════════════════════════════
+const ROOT_STYLE = getComputedStyle(document.documentElement);
+const POS_HUE = parseFloat(ROOT_STYLE.getPropertyValue('--pos-hue')) || 130;
+const NEG_HUE = parseFloat(ROOT_STYLE.getPropertyValue('--neg-hue')) || 355;
+const ROW_H   = parseFloat(ROOT_STYLE.getPropertyValue('--row-h')) || 16;
+
+function intensityToColor(gex, maxAbs) {
+  if (gex === 0 || maxAbs === 0) return 'transparent';
+  const intensity = Math.pow(Math.abs(gex) / maxAbs, 0.7);
+  const lightness = (4 + intensity * 46).toFixed(1);
+  const hue = gex > 0 ? POS_HUE : NEG_HUE;
+  return `hsl(${hue}, 95%, ${lightness}%)`;
+}
+
+function pathResistance(target, current, strikesMap) {
+  if (Math.abs(target - current) < 0.5) return 0;
+  const lo = Math.min(target, current);
+  const hi = Math.max(target, current);
+  let r = 0;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    const s = parseFloat(k);
+    if (s > lo && s < hi) {
+      if (g > 0) r += g;
+      else r -= Math.abs(g) * 0.4;
+    }
+  }
+  return Math.max(0, r);
+}
+
+function findMagnets(strikesMap) {
+  let pos = null, neg = null, pg = 0, ng = 0;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    if (g > pg) { pos = parseFloat(k); pg = g; }
+    if (g < ng) { neg = parseFloat(k); ng = g; }
+  }
+  return { positive: pos, negative: neg, posGex: pg, negGex: ng };
+}
+
+function findWalls(strikesMap, current, pin, put) {
+  const vals = Object.values(strikesMap);
+  if (vals.length === 0) return { down: null, up: null, downGex: 0, upGex: 0 };
+  const maxAbs = Math.max(...vals.map(Math.abs));
+  const threshold = maxAbs * 0.05;
+  let dn = null, up = null, dnG = 0, upG = 0;
+  const lower = put !== null ? put : -Infinity;
+  const upper = pin !== null ? pin : current;
+  for (const [k, g] of Object.entries(strikesMap)) {
+    const s = parseFloat(k);
+    if (g <= threshold) continue;
+    if (s < current && s > lower && g > dnG) { dn = s; dnG = g; }
+    if (s > upper && g > upG) { up = s; upG = g; }
+  }
+  return { down: dn, up, downGex: dnG, upGex: upG };
+}
+
+function buildStrikes(tk) {
+  const { low, high, step } = tk.strikeRange;
+  const set = new Set();
+  if (step > 0) {
+    for (let s = high; s >= low; s -= step) set.add(Math.round(s * 100) / 100);
+  }
+  Object.keys(tk.strikes).map(Number).forEach(s => {
+    if (s >= low && s <= high) set.add(s);
+  });
+  return Array.from(set).sort((a, b) => b - a);
+}
+
+function fmtMoney(v) {
+  // One decimal to preserve nuance between close runners.
+  if (v === 0) return '·';
+  const abs = Math.abs(v);
+  const sign = v >= 0 ? '+' : '−';
+  if (abs >= 1_000_000_000) return `${sign}$${(abs/1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000)     return `${sign}$${(abs/1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)         return `${sign}$${(abs/1000).toFixed(1)}k`;
+  return `${sign}$${Math.round(abs)}`;
+}
+
+// Dominance score — see gamma-heatmap-0dte.html for full notes.
+function dominanceScore(strikesMap, peakStrike) {
+  if (peakStrike == null) return 0;
+  const peakAbs = Math.abs(strikesMap[peakStrike] || 0);
+  if (peakAbs === 0) return 0;
+  const others = Object.entries(strikesMap)
+    .filter(([k]) => parseFloat(k) !== peakStrike)
+    .map(([, v]) => Math.abs(v))
+    .filter(v => v > 0)
+    .sort((a, b) => b - a)
+    .slice(0, 5);
+  if (!others.length) return 1;
+  const median = others[Math.floor(others.length / 2)];
+  if (median <= 0) return 1;
+  const ratio = peakAbs / median;
+  return Math.max(0, Math.min(1, Math.log10(ratio) / Math.log10(8)));
+}
+
+function peakStarHtml(score, peakGex) {
+  const filled = score >= 0.2 ? '★' : '☆';
+  const fontSize = 9 + score * 4;
+  const opacity = 0.45 + score * 0.55;
+  const hotYellow = score >= 0.8;
+  const color = hotYellow ? '#fde047' : 'var(--accent)';
+  // No glow below score 0.5; ramps 0 → 12px over [0.5, 1].
+  let shadowCss = 'none';
+  if (score >= 0.5) {
+    const t = (score - 0.5) / 0.5;
+    const blur = t * 12;
+    const glowOpacity = 0.3 + t * 0.6;
+    const shadow = (hotYellow ? 'rgba(253,224,71,' : 'rgba(251,191,36,') + glowOpacity + ')';
+    shadowCss = `0 0 ${blur.toFixed(1)}px ${shadow}`;
+  }
+  const title = `Peak dominance ${score.toFixed(2)} · ${fmtMoney(peakGex)}`;
+  return `<span class="peak-star" style="`
+       + `font-size:${fontSize.toFixed(1)}px;opacity:${opacity.toFixed(2)};`
+       + `color:${color};text-shadow:${shadowCss};`
+       + `" title="${title}">${filled}</span>`;
+}
+
+function fmtStrike(s) {
+  return s % 1 === 0 ? `$${s}` : `$${s.toFixed(2)}`;
+}
+
+// ═══════════════════════════════════════════════════
+//  RENDER — one column per ticker
+// ═══════════════════════════════════════════════════
+function renderColumn(ticker, tk) {
+  const col = document.createElement('div');
+  col.className = 'column';
+
+  // Header
+  const head = document.createElement('div');
+  head.className = 'col-head';
+  head.innerHTML = `
+    <span class="col-ticker">${ticker}</span>
+    <span class="col-name">${tk.name}</span>
+    <div class="col-head-right">
+      <span class="regime-badge" id="regime-${ticker}"></span>
+    </div>
+  `;
+  col.appendChild(head);
+
+  // Subtitle — day change only (Current Price promoted to stats row; ATM dropped)
+  const sub = document.createElement('div');
+  sub.className = 'col-subtitle';
+  const subBits = [];
+  if (tk.dayChange != null && tk.dayChangePct != null) {
+    const sign = tk.dayChange >= 0 ? '+' : '−';
+    subBits.push(`Day <strong>${sign}$${Math.abs(tk.dayChange)} (${sign}${Math.abs(tk.dayChangePct)}%)</strong>`);
+  }
+  if (subBits.length) {
+    sub.innerHTML = subBits.join(' <span style="color:var(--text-dim);">·</span> ');
+    col.appendChild(sub);
+  }
+
+  // Regime badge — driven by explicit `regime` field so we still render
+  // a verdict when the cumulative band sum stays one-signed (no flip in range)
+  // but the regime is clearly positive or negative.
+  const regimeEl = head.querySelector(`#regime-${ticker}`);
+  if (tk.regime === 'positive') {
+    regimeEl.className = 'regime-badge positive';
+    regimeEl.innerHTML = '<span class="regime-dot"></span>Pos · Compress';
+  } else if (tk.regime === 'negative') {
+    regimeEl.className = 'regime-badge negative';
+    regimeEl.innerHTML = '<span class="regime-dot"></span>Neg · Expand';
+  } else {
+    regimeEl.style.display = 'none';
+  }
+
+  // Magnets / walls — relative thresholds so the math scales across endpoints
+  // and tickers (SPX gex is in the 10ks; SPY/QQQ in the 100ks).
+  const magnets = findMagnets(tk.strikes);
+  const vals = Object.values(tk.strikes);
+  const maxAbsAll = vals.length ? Math.max(...vals.map(Math.abs)) : 0;
+  const magnetThreshold = maxAbsAll * 0.05;
+  const pinStrike = (magnets.positive !== null && magnets.posGex >= magnetThreshold) ? magnets.positive : null;
+  const putStrike = (magnets.negative !== null && magnets.negGex <= -magnetThreshold) ? magnets.negative : null;
+  const walls = findWalls(tk.strikes, tk.currentPrice, pinStrike, putStrike);
+
+  // Stats
+  const stats = document.createElement('div');
+  stats.className = 'stats';
+  // Direction class derived from sub text sign: "+" → pos (green), "−" → neg (red)
+  const subSignCls = (s) => {
+    if (typeof s !== 'string') return '';
+    if (s.startsWith('+')) return 'pos';
+    if (s.startsWith('−') || s.startsWith('-')) return 'neg';
+    return '';
+  };
+  const statCard = (label, value, sub, cls) => `
+    <div class="stat">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value ${cls || ''}">${value}</div>
+      <div class="stat-sub ${subSignCls(sub)}">${sub}</div>
+    </div>`;
+  const curSub = (tk.dayChange != null && tk.dayChangePct != null)
+    ? `${tk.dayChange >= 0 ? '+' : '−'}$${Math.abs(tk.dayChange)} (${tk.dayChange >= 0 ? '+' : '−'}${Math.abs(tk.dayChangePct)}%)`
+    : '';
+  // "As of" timestamp inside the Current cell — second precision
+  const asOfStr = window.__ASOF_TIME_STR__ || '';
+  const asOfHtml = asOfStr ? `<div class="stat-asof">as of ${asOfStr}</div>` : '';
+  // Walls as a single stacked cell (Wall ↑ on top, Wall ↓ on bottom)
+  const wallUpSub = walls.up !== null ? fmtMoney(walls.upGex, 1) : 'open';
+  const wallDnSub = walls.down !== null ? fmtMoney(walls.downGex, 1) : 'open';
+  const wallsHtml = `
+    <div class="stat stat-walls">
+      <div class="wall-half">
+        <div class="stat-label">Wall ↑</div>
+        <div class="stat-value wall-clr">${walls.up !== null ? fmtStrike(walls.up) : '—'}</div>
+        <div class="stat-sub ${subSignCls(wallUpSub)}">${wallUpSub}</div>
+      </div>
+      <div class="wall-half">
+        <div class="stat-label">Wall ↓</div>
+        <div class="stat-value wall-clr">${walls.down !== null ? fmtStrike(walls.down) : '—'}</div>
+        <div class="stat-sub ${subSignCls(wallDnSub)}">${wallDnSub}</div>
+      </div>
+    </div>`;
+  stats.innerHTML = `
+    <div class="stat">
+      <div class="stat-label">Current</div>
+      <div class="stat-value current">$${tk.currentPrice.toLocaleString()}</div>
+      <div class="stat-sub ${subSignCls(curSub)}">${curSub}</div>
+      ${asOfHtml}
+    </div>` +
+    statCard('Pin', pinStrike !== null ? fmtStrike(pinStrike) : '—',
+      pinStrike !== null ? fmtMoney(magnets.posGex, 1) : 'no magnet', 'pos') +
+    wallsHtml +
+    statCard('Put Mag', putStrike !== null ? fmtStrike(putStrike) : '—',
+      putStrike !== null ? fmtMoney(magnets.negGex, 1) : 'no magnet', 'neg');
+  col.appendChild(stats);
+
+  // Tiny session-range strip — shows where price has already traveled today.
+  // Position of current price within [low, high] is the amber tick.
+  if (tk.sessionRange && tk.sessionRange.high != null && tk.sessionRange.low != null) {
+    const sr = tk.sessionRange;
+    const range = Math.max(0.0001, sr.high - sr.low);
+    const pos = Math.max(0, Math.min(1, (tk.currentPrice - sr.low) / range));
+    const span = sr.high - sr.low;
+    const lbl = sr.label || 'Day';
+    const strip = document.createElement('div');
+    strip.className = 'session-range';
+    strip.innerHTML = `
+      <span class="sr-label">${lbl}</span>
+      <span class="sr-lo">${fmtStrike(sr.low)}</span>
+      <div class="sr-bar">
+        <div class="sr-bar-fill" style="left:0;right:0;"></div>
+        <div class="sr-now" style="left:${(pos * 100).toFixed(1)}%;"></div>
+      </div>
+      <span class="sr-hi">${fmtStrike(sr.high)}</span>
+      <span class="sr-span">${span >= 10 ? span.toFixed(1) : span.toFixed(2)} pt</span>
+    `;
+    col.appendChild(strip);
+  }
+
+  // Heatmap
+  const wrap = document.createElement('div');
+  wrap.className = 'heatmap-wrap';
+  const frame = document.createElement('div');
+  frame.className = 'heatmap-frame';
+  const inner = document.createElement('div');
+  inner.className = 'heatmap-inner';
+  frame.appendChild(inner);
+  wrap.appendChild(frame);
+  col.appendChild(wrap);
+
+  const strikes = buildStrikes(tk);
+  if (strikes.length === 0) {
+    inner.innerHTML = '<div style="padding:20px;color:var(--text-mute);font-size:11px;text-align:center;">No data — run refresh script.</div>';
+    return col;
+  }
+
+  let peakAbsStrike = null, peakAbs = 0;
+  for (const [k, g] of Object.entries(tk.strikes)) {
+    if (Math.abs(g) > peakAbs) { peakAbs = Math.abs(g); peakAbsStrike = parseFloat(k); }
+  }
+  const peakDominance = dominanceScore(tk.strikes, peakAbsStrike);
+  const maxAbsGex = Math.max(...Object.values(tk.strikes).map(Math.abs));
+
+  const resistances = {};
+  strikes.forEach(s => resistances[s] = pathResistance(s, tk.currentPrice, tk.strikes));
+  const maxResistance = Math.max(...Object.values(resistances), 0);
+
+  function isBlocked(strike) {
+    if (walls.down !== null && strike < walls.down) return true;
+    if (walls.up   !== null && strike > walls.up)   return true;
+    return false;
+  }
+
+  const priceRowIdx = strikes.findIndex(s => s <= tk.currentPrice);
+  const magnetPosIdx = pinStrike !== null ? strikes.indexOf(pinStrike) : -1;
+  const magnetNegIdx = putStrike !== null ? strikes.indexOf(putStrike) : -1;
+  const isIntStep = (tk.strikeRange.step || 1) >= 1;
+
+  strikes.forEach(strike => {
+    const gex = tk.strikes[strike] || 0;
+    const color = intensityToColor(gex, maxAbsGex);
+    const majorMod = (tk.strikeRange.step || 1) * 5;
+    const isMajor = strike % majorMod === 0;
+    const isWall = strike === walls.down || strike === walls.up;
+    const blocked = isBlocked(strike) && !isWall;
+
+    const opacity = maxResistance > 0
+      ? Math.max(0.35, 1 - Math.pow(resistances[strike] / maxResistance, 0.7) * 0.5)
+      : 1;
+
+    const cellClasses = ['heat-cell'];
+    if (isWall) cellClasses.push('wall');
+    if (blocked) cellClasses.push('blocked');
+
+    let valueClass = '';
+    if (gex > 1_000_000) valueClass = 'peak-pos';
+    else if (gex < -300_000) valueClass = 'peak-neg';
+    else if (Math.abs(gex) > 200_000) valueClass = 'significant';
+    if (isWall) valueClass = 'wall-tag';
+
+    const isPeak = strike === peakAbsStrike;
+    // When peak qualifies as bright-yellow (dominance ≥ 0.8), upgrade the
+    // gex-value styling to match the star: bold yellow with halo.
+    if (isPeak && peakDominance >= 0.8) valueClass = 'peak-bright';
+    const starHtml = isPeak ? peakStarHtml(peakDominance, gex) : '';
+
+    const row = document.createElement('div');
+    row.className = 'strike-row';
+    row.innerHTML = `
+      <div class="strike-label ${isMajor ? 'major' : ''}">${fmtStrike(strike)}</div>
+      <div class="${cellClasses.join(' ')}" style="background:${color};opacity:${opacity.toFixed(2)};"
+           title="${fmtStrike(strike)} · gex ${fmtMoney(gex)}"></div>
+      <div class="gex-value ${valueClass}">${fmtMoney(gex)}${starHtml}</div>
+    `;
+    inner.appendChild(row);
+  });
+
+  // Price line — interpolated between adjacent strikes
+  const priceLine = document.createElement('div');
+  priceLine.className = 'price-line';
+  const sa = strikes[priceRowIdx - 1];
+  const sb = strikes[priceRowIdx];
+  const interp = (sa != null && sb != null) ? (sa - tk.currentPrice) / (sa - sb) : 0.5;
+  const priceY = (priceRowIdx - 1 + interp) * ROW_H;
+  priceLine.style.top = priceY + 'px';
+  inner.appendChild(priceLine);
+
+  function strikeToY(price) {
+    const idx = strikes.findIndex(s => s <= price);
+    if (idx < 0) return strikes.length * ROW_H;
+    if (idx === 0) return 0;
+    const a = strikes[idx - 1], b = strikes[idx];
+    const i = a !== b ? (a - price) / (a - b) : 0;
+    return (idx - 1 + i) * ROW_H;
+  }
+
+  if (tk.gammaFlip != null
+      && tk.gammaFlip >= tk.strikeRange.low
+      && tk.gammaFlip <= tk.strikeRange.high) {
+    const flipLine = document.createElement('div');
+    flipLine.className = 'flip-line';
+    flipLine.style.top = strikeToY(tk.gammaFlip) + 'px';
+    flipLine.innerHTML = `<div class="flip-marker">Flip ${fmtStrike(tk.gammaFlip)}</div>`;
+    inner.appendChild(flipLine);
+  }
+
+  if (magnetPosIdx >= 0) {
+    const g = document.createElement('div');
+    g.className = 'magnet-pulse';
+    g.style.top = (magnetPosIdx * ROW_H) + 'px';
+    inner.appendChild(g);
+  }
+  if (magnetNegIdx >= 0) {
+    const g = document.createElement('div');
+    g.className = 'magnet-pulse neg';
+    g.style.top = (magnetNegIdx * ROW_H) + 'px';
+    inner.appendChild(g);
+  }
+
+  // POC — single dotted amber line from Volume Profile / Fixed Range
+  if (tk.poc != null
+      && tk.poc >= tk.strikeRange.low
+      && tk.poc <= tk.strikeRange.high) {
+    const pocLine = document.createElement('div');
+    pocLine.className = 'poc-line';
+    pocLine.style.top = strikeToY(tk.poc) + 'px';
+    pocLine.innerHTML = `<div class="poc-marker">POC ${fmtStrike(tk.poc)}</div>`;
+    inner.appendChild(pocLine);
+  }
+
+  // Strat target — one line at the matched setup's P1 high/low.
+  // Only renders when stratSetup is non-null (a valid 3-bar setup matched).
+  if (tk.stratSetup && tk.stratSetup.target != null
+      && tk.stratSetup.target >= tk.strikeRange.low
+      && tk.stratSetup.target <= tk.strikeRange.high) {
+    const ss = tk.stratSetup;
+    const arrow = ss.direction === 'bullish' ? '↑' : '↓';
+    const stratLine = document.createElement('div');
+    stratLine.className = 'strat-line';
+    stratLine.style.top = strikeToY(ss.target) + 'px';
+    stratLine.innerHTML = `<div class="strat-marker">Strat ${arrow} ${ss.pattern} · ${fmtStrike(ss.target)}</div>`;
+    inner.appendChild(stratLine);
+  }
+
+  // Daily S&D zones — proper paired rectangles from Market Structure indicator.
+  // Top 3 closest per side, unmitigated only. Each zone has upper + lower
+  // bounds derived from the broken-pivot trigger + paired swing pivot.
+  (tk.weeklyZones || []).forEach(zone => {
+    if (zone.mitigated) return;
+    const top = zone.upper != null ? zone.upper : Math.max(zone.entry, zone.sl);
+    const bot = zone.lower != null ? zone.lower : Math.min(zone.entry, zone.sl);
+    if (top < tk.strikeRange.low || bot > tk.strikeRange.high) return;
+    const visTop = Math.min(top, tk.strikeRange.high);
+    const visBot = Math.max(bot, tk.strikeRange.low);
+    const topPx = strikeToY(visTop);
+    const botPx = strikeToY(visBot);
+    const box = document.createElement('div');
+    box.className = 'structure-zone';
+    box.style.top = topPx + 'px';
+    box.style.height = Math.max(2, botPx - topPx) + 'px';
+    const labelPos = zone.type === 'supply' ? 'bottom' : 'top';
+    const sigil = zone.type === 'supply' ? 'S' : 'D';
+    box.innerHTML = `<div class="structure-zone-label ${labelPos}">${sigil} · ${fmtStrike(top)}—${fmtStrike(bot)}</div>`;
+    inner.appendChild(box);
+  });
+
+  // Auto-scroll to current price (centered in viewport)
+  requestAnimationFrame(() => {
+    const frameH = frame.clientHeight;
+    const target = Math.max(0, priceY - frameH / 2);
+    frame.scrollTop = target;
+  });
+
+  return col;
+}
+
+function renderConfluence(cfg) {
+  const el = document.getElementById('confluence-ribbon');
+  const c = cfg.confluence || { verdict: '—', tone: 'mixed' };
+  el.className = `confluence-ribbon ${c.tone || 'mixed'}`;
+  el.innerHTML = `<span class="ribbon-dot"></span>${c.verdict}`;
+}
+
+function renderTopMeta(cfg) {
+  document.getElementById('expiry-tag').textContent = cfg.expiryLabel || '';
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('generated').textContent =
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ET`;
+    // Expose HH:MM:SS string for per-column "as of" cells in stats render
+    window.__ASOF_TIME_STR__ =
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
+  }
+}
+
+// Refresh button — copies the command to clipboard and shows a brief toast
+(function wireRefreshButton() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.refresh-btn');
+    if (!btn) return;
+    const cmd = btn.getAttribute('data-cmd') || '';
+    const toast = document.getElementById('toast');
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = cmd;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      ta.remove();
+    };
+    const ok = () => {
+      if (!toast) return;
+      toast.innerHTML = `Copied — paste in terminal:<code>${cmd}</code>`;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(ok).catch(() => { fallback(); ok(); });
+    } else {
+      fallback(); ok();
+    }
+  });
+})();
+
+function renderAnalysis(cfg) {
+  const sections = [];
+  if (cfg.confluence && cfg.confluence.note) {
+    sections.push(`
+      <div class="section">
+        <span class="label">Confluence</span>
+        ${cfg.confluence.note}
+      </div>`);
+  }
+  if (cfg.analysisNote) {
+    sections.push(`
+      <div class="section">
+        <span class="label">Analysis</span>
+        ${cfg.analysisNote}
+      </div>`);
+  }
+  // Per-ticker quick read
+  for (const [tk, data] of Object.entries(cfg.tickers || {})) {
+    if (!data.strikes || Object.keys(data.strikes).length === 0) continue;
+    const m = findMagnets(data.strikes);
+    const vals = Object.values(data.strikes);
+    const maxAbs = vals.length ? Math.max(...vals.map(Math.abs)) : 0;
+    const thr = maxAbs * 0.05;
+    const pin = (m.posGex >= thr) ? m.positive : null;
+    const put = (m.negGex <= -thr) ? m.negative : null;
+    const walls = findWalls(data.strikes, data.currentPrice, pin, put);
+    const bits = [];
+    // Add current price as a level fragment too — synonym set with pin/walls/put_mag
+    bits.push(`current <strong>${fmtStrike(data.currentPrice)}</strong>`);
+    if (pin !== null) bits.push(`pin <span class="pos">${fmtStrike(pin)}</span>`);
+    if (walls.up !== null) bits.push(`wall ↑ <span class="accent">${fmtStrike(walls.up)}</span>`);
+    if (walls.down !== null) bits.push(`wall ↓ <span class="accent">${fmtStrike(walls.down)}</span>`);
+    if (put !== null) bits.push(`put mag <span class="neg">${fmtStrike(put)}</span>`);
+
+    // Two AP-style sentences: Setup (where price sits in the structure) +
+    // Play (what's the immediate test, what breaks it, where it routes).
+    const prose = analysisProse(tk, data, pin, walls, put);
+
+    sections.push(`
+      <div class="section">
+        <span class="label">${tk}</span>
+        ${bits.join(' · ') || '<span class="mute">no signals</span>'}
+        <div style="margin-top:8px; line-height:1.55;">${prose}</div>
+      </div>`);
+  }
+  document.getElementById('analysis').innerHTML = sections.join('');
+}
+
+// AP-style two-sentence per-ticker read.
+// Sentence 1 (setup): regime + pin location relative to current price + wall geometry.
+// Sentence 2 (play): which wall is closer, what breaks it, where it routes.
+// Templates are deterministic — same inputs always produce same prose, so the
+// text never reads as a hallucination.
+function analysisProse(tk, data, pin, walls, put) {
+  const price = data.currentPrice;
+  const regime = data.regime === 'positive' ? 'positive-gamma compression'
+              : data.regime === 'negative' ? 'negative-gamma expansion'
+              : 'mixed structure';
+
+  // ─── Sentence 1: setup ───
+  let s1;
+  if (pin == null) {
+    const wallText = walls.up ? `the $${fmtStrikeNum(walls.up)} call wall` : 'open path above';
+    s1 = `${tk} trades in ${regime} with no near-price pin to anchor it, opening the field toward ${wallText}.`;
+  } else {
+    const dist = price - pin;
+    const absDist = Math.abs(dist);
+    const proximity = absDist / price;
+    let pinDesc;
+    if (proximity < 0.001) {
+      pinDesc = `the $${fmtStrikeNum(pin)} pin sits right at price`;
+    } else if (dist > 0) {
+      pinDesc = `the $${fmtStrikeNum(pin)} pin anchors ${fmtDist(absDist)} below`;
+    } else {
+      pinDesc = `the $${fmtStrikeNum(pin)} pin pulls ${fmtDist(absDist)} above`;
+    }
+    s1 = `${tk} holds in ${regime} with ${pinDesc} current.`;
+  }
+
+  // ─── Sentence 2: play ───
+  let s2;
+  const distUp = walls.up != null ? walls.up - price : Infinity;
+  const distDown = walls.down != null ? price - walls.down : Infinity;
+  const haveUp = isFinite(distUp);
+  const haveDown = isFinite(distDown);
+  const putTarget = put != null ? `the $${fmtStrikeNum(put)} put magnet` : 'open path lower';
+
+  if (haveUp && haveDown && distUp <= distDown) {
+    s2 = `A break of the $${fmtStrikeNum(walls.up)} wall opens upside continuation; rejection here fades back through the $${fmtStrikeNum(walls.down)} wall toward ${putTarget}.`;
+  } else if (haveUp && haveDown) {
+    s2 = `Hold of the $${fmtStrikeNum(walls.down)} wall sets up a retest of the $${fmtStrikeNum(walls.up)} cap; loss of $${fmtStrikeNum(walls.down)} routes price toward ${putTarget}.`;
+  } else if (haveUp) {
+    s2 = `The $${fmtStrikeNum(walls.up)} wall is the only structural cap overhead; clearing it opens continuation, while no wall below leaves an open path toward ${putTarget}.`;
+  } else if (haveDown) {
+    s2 = `The $${fmtStrikeNum(walls.down)} wall is the lone structural support; losing it routes price toward ${putTarget}, while no wall above means the upside is open path.`;
+  } else {
+    s2 = `Walls have not anchored on either side, leaving price free to drift toward the next magnet ${putTarget}.`;
+  }
+
+  return `${s1} ${s2}`;
+}
+
+function fmtStrikeNum(s) {
+  return s % 1 === 0 ? String(s) : s.toFixed(2);
+}
+function fmtDist(d) {
+  if (d >= 100) return Math.round(d) + ' points';
+  if (d >= 10) return d.toFixed(0) + ' points';
+  return d.toFixed(1) + ' points';
+}
+
+function render(cfg) {
+  document.title = `Live Gamma · ${cfg.expiryLabel || 'Cross-Expiry'}`;
+  renderTopMeta(cfg);
+  renderConfluence(cfg);
+  const cols = document.getElementById('columns');
+  cols.innerHTML = '';
+  for (const [ticker, tk] of Object.entries(cfg.tickers || {})) {
+    cols.appendChild(renderColumn(ticker, tk));
+  }
+  renderAnalysis(cfg);
+}
+
+render(CONFIG);
+</script>
+</body>
+</html>

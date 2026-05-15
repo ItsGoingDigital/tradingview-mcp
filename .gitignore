@@ -4,3 +4,8 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+.mcp.json
+
+# Rendered chart output — refresh scripts write here every run.
+# Templates committed in charts/templates/ are the source of truth.
+charts/rendered/
