@@ -71,6 +71,23 @@ def get_latest_snapshot(ticker):
     return rows[0] if rows else None
 
 
+def get_session_snapshots(tickers, since_iso, limit=200):
+    """Return all snapshots for the given tickers since `since_iso`.
+
+    Used by the notification engine to accumulate intra-session diffs.
+    Returns dict {ticker: [snapshot, ...]} sorted chronologically (oldest first).
+    """
+    out = {}
+    for t in tickers:
+        rows = _supabase_get(
+            f'/rest/v1/gamma_snapshots?ticker=eq.{t}'
+            f'&captured_at=gte.{since_iso}'
+            f'&order=captured_at.asc&limit={limit}'
+        )
+        out[t] = rows or []
+    return out
+
+
 def store_snapshot(ticker, expiry, levels, strikes, raw=None):
     """Insert a snapshot + per-strike rows. Returns snapshot id.
 

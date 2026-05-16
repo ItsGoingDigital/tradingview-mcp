@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mega-Cap Scan · Gamma</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --frame: #131313;
+    --frame-2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --text: #f0f0f0;
+    --text-mute: #8a8a8a;
+    --text-dim: #4a4a4a;
+    --accent: #fbbf24;
+    --accent-soft: rgba(251,191,36,0.15);
+    --pos-hue: 130;
+    --neg-hue: 355;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; padding: 0; }
+  body {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    color: var(--text);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    padding: 64px 24px 40px;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    line-height: 1.4;
+  }
+
+  /* navbar */
+  .navbar { position: fixed; top: 0; left: 0; right: 0; background: var(--frame);
+            border-bottom: 1px solid var(--border); padding: 8px 24px; z-index: 50;
+            backdrop-filter: blur(8px); }
+  .nav-inner { max-width: 1620px; margin: 0 auto; display: flex; align-items: center; gap: 20px; }
+  .nav-brand { font-weight: 900; font-size: 13px; letter-spacing: -0.3px; color: var(--accent); }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link { color: var(--text-mute); text-decoration: none; font-size: 10px; font-weight: 700;
+              text-transform: uppercase; letter-spacing: 1.4px; padding: 5px 11px;
+              border-radius: 3px; border: 1px solid transparent; transition: all 0.15s; }
+  .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); }
+  .nav-link.active { color: var(--accent); background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.32); }
+
+  .container { width: 100%; max-width: 1400px; }
+
+  /* top strip */
+  .top-strip { display: flex; align-items: center; justify-content: space-between;
+               gap: 12px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .top-left { display: flex; align-items: baseline; gap: 12px; }
+  .title { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; }
+  .title-sub { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  .top-right { display: flex; align-items: center; gap: 8px; }
+  .expiry-tag, .generated {
+    font-size: 9.5px; color: var(--text-mute); text-transform: uppercase;
+    letter-spacing: 1.8px; font-weight: 700; padding: 5px 10px;
+    background: var(--frame); border: 1px solid var(--border); border-radius: 3px;
+  }
+  .generated { color: var(--text-dim); }
+  .refresh-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px;
+                 background: var(--frame); border: 1px solid var(--border-strong); border-radius: 3px;
+                 color: var(--text); font-family: inherit; font-size: 10px; font-weight: 700;
+                 letter-spacing: 1.4px; text-transform: uppercase; cursor: pointer; transition: all 0.15s; }
+  .refresh-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.32); }
+  .refresh-btn:active { transform: scale(0.97); }
+  .refresh-icon { font-size: 13px; line-height: 1; }
+  .toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-12px);
+           background: var(--frame); color: var(--text); border: 1px solid var(--accent); border-radius: 4px;
+           padding: 10px 18px; font-size: 12px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+           opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 100; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast code { color: var(--accent); font-family: inherit; margin-left: 6px; }
+
+  /* top pick callout */
+  .top-pick {
+    margin-bottom: 18px;
+    padding: 16px 20px;
+    background: linear-gradient(180deg, rgba(251,191,36,0.06), var(--frame));
+    border: 1px solid rgba(251,191,36,0.4);
+    border-radius: 6px;
+  }
+  .top-pick-label {
+    font-size: 10px; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 1.8px; font-weight: 700; margin-bottom: 6px;
+  }
+  .top-pick-body { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+  .top-pick-body .gap { font-size: 22px; font-weight: 900; }
+  .top-pick-body .ticker { color: var(--accent); }
+  .top-pick-body.pos .gap { color: hsl(var(--pos-hue), 90%, 60%); }
+  .top-pick-body.neg .gap { color: hsl(var(--neg-hue), 90%, 60%); }
+  .top-pick-meta { margin-top: 4px; font-size: 11px; color: var(--text-mute); font-weight: 500; }
+
+  /* filter chips */
+  .filters {
+    display: flex; gap: 8px; margin-bottom: 12px; align-items: center;
+  }
+  .filter-label {
+    font-size: 9.5px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 1.6px; font-weight: 700;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 11px; background: var(--frame); border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-mute); font-size: 10px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase; cursor: pointer; transition: all 0.15s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--border-strong); }
+  .chip.active { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.4); color: var(--accent); }
+
+  /* table — mirrors Retail Scan styling for consistency */
+  table {
+    width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+    background: var(--frame); border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  thead th {
+    font-size: 9.5px; color: var(--text-mute); text-transform: uppercase;
+    letter-spacing: 1.4px; font-weight: 700; text-align: right;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    background: var(--frame-2);
+  }
+  thead th.left { text-align: left; }
+  tbody td {
+    padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-size: 12px; text-align: right;
+  }
+  tbody td.left { text-align: left; }
+  tbody tr:hover td { background: rgba(255,255,255,0.02); }
+  tbody tr:last-child td { border-bottom: none; }
+  .ticker { font-weight: 900; font-size: 13px; letter-spacing: -0.2px; }
+  .ticker a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--text-dim); }
+  .ticker a:hover { border-bottom-color: var(--text); }
+  .ticker-name { font-size: 10px; color: var(--text-dim); font-weight: 500; margin-left: 4px; }
+  .grade {
+    display: inline-block; font-size: 10px; font-weight: 900; letter-spacing: 1.5px;
+    padding: 3px 9px; border-radius: 3px; text-align: center; min-width: 26px;
+  }
+  .grade.A { background: rgba(251,191,36,0.20); color: #fde047; border: 1px solid rgba(251,191,36,0.55); font-weight: 900; }
+  .grade.B { background: rgba(255,255,255,0.10); color: var(--text); border: 1px solid rgba(255,255,255,0.32); }
+  .grade.C { background: rgba(251,191,36,0.12); color: var(--accent); border: 1px solid rgba(251,191,36,0.32); }
+  .grade.D { background: rgba(124,58,237,0.12); color: #c4b5fd; border: 1px solid rgba(124,58,237,0.32); }
+  .grade.F { background: rgba(255,255,255,0.04); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.1); }
+  .dir-up   { color: hsl(var(--pos-hue), 85%, 60%); font-weight: 900; }
+  .dir-down { color: hsl(var(--neg-hue), 85%, 60%); font-weight: 900; }
+  .mode-pill {
+    display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+    padding: 2px 6px; border-radius: 2px; text-transform: uppercase;
+  }
+  .mode-pill.pin      { background: rgba(251,191,36,0.12); color: var(--accent); border: 1px solid rgba(251,191,36,0.32); }
+  .mode-pill.breakout { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid rgba(255,255,255,0.28); }
+  tr.skipped td { opacity: 0.55; }
+  .status-tag {
+    font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 2px;
+    background: rgba(255,255,255,0.04); color: var(--text-mute);
+  }
+
+  /* Footer copy */
+  .footnote {
+    margin-top: 18px; padding: 14px 18px;
+    background: var(--frame); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 11px; color: var(--text-mute); line-height: 1.6;
+  }
+  .footnote strong { color: var(--text); font-weight: 700; }
+  .footnote code {
+    background: rgba(255,255,255,0.05); color: var(--accent);
+    padding: 1px 5px; border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="nav-brand">γ Gamma</span>
+    <div class="nav-links">
+      <a href="gamma-heatmap-multi.html" class="nav-link">Cross-Asset</a>
+      <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
+      <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
+      <a href="screener.html" class="nav-link">Flow Screener</a>
+      <a href="scan.html" class="nav-link">Retail Scan</a>
+      <a href="mega-scan.html" class="nav-link active">Mega-Cap Scan</a>
+    </div>
+  </div>
+</nav>
+<div class="container">
+
+  <div class="top-strip">
+    <div class="top-left">
+      <span class="title">Mega-Cap Scan</span>
+      <span class="title-sub">Top 10 QQQ weight · Ranked by grade then expected move</span>
+    </div>
+    <div class="top-right">
+      <span class="expiry-tag" id="expiry-tag"></span>
+      <span class="generated" id="generated"></span>
+      <button class="refresh-btn" id="refresh-btn" type="button"
+              data-cmd="python3 scripts/scan_mega.py"
+              title="Copy refresh command to clipboard">
+        <span class="refresh-icon">↻</span><span>Refresh</span>
+      </button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <div id="table-body"></div>
+
+  <div class="footnote">
+    <strong>How to read this:</strong> for each ticker we pull the EOW
+    (this-Friday) options chain from Unusual Whales and score it on the
+    shared gamma rubric: <strong>cluster detection</strong>, <strong>directional
+    magnet filter</strong>, <strong>magnitude floor</strong>, and
+    <strong>regime-aware mode</strong> (PIN for positive gamma, BREAKOUT
+    for negative). Rows are ranked by grade tier (A → D), then by expected
+    move % within tier. Score is deterministic — same data always yields
+    the same grade.
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG — refresh script rewrites this block
+// ═══════════════════════════════════════════════════
+const CONFIG = {
+  asOf: '',
+  expiry: '',
+  expiryLabel: '',
+  setups: [],
+  skipped: [],
+};
+
+// ═══════════════════════════════════════════════════
+// Render
+// ═══════════════════════════════════════════════════
+function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+function fmtMoney(v) { return '$' + v.toFixed(2); }
+
+// ─── EOW-style sortable table render ───
+const GRADE_RANK = { A: 0, B: 1, C: 2, D: 3, F: 4 };
+
+function renderRow(r) {
+  const dir = r.direction;
+  const arrowClass = dir === 'LONG' ? 'dir-up' : 'dir-down';
+  const arrow = dir === 'LONG' ? '↑' : (dir === 'SHORT' ? '↓' : '—');
+  const dirLabel = dir || '—';
+  const modePill = r.mode ? `<span class="mode-pill ${r.mode.toLowerCase()}">${r.mode}</span>` : '—';
+  const pathStr = r.pathClarity != null ? `${Math.round(r.pathClarity * 100)}%` : '—';
+  const strikeStr = r.suggestedStrike != null ? `$${r.suggestedStrike.toFixed(2)}` : '—';
+  return `
+    <tr data-grade="${r.grade}" data-score="${Math.abs(r.gapPct||0)}" data-ticker="${r.ticker}">
+      <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${r.ticker}" target="_blank">${r.ticker}</a><span class="ticker-name">${r.name || ''}</span></span></td>
+      <td><span class="grade ${r.grade}">${r.grade}</span></td>
+      <td>${modePill}</td>
+      <td><span class="${arrowClass}">${arrow} ${dirLabel}</span></td>
+      <td>$${r.price.toFixed(2)}</td>
+      <td>$${r.target.toFixed(2)}</td>
+      <td>${fmtPct(r.gapPct)}</td>
+      <td>${strikeStr}</td>
+      <td>${pathStr}</td>
+    </tr>
+  `;
+}
+
+function renderSkippedRow(s) {
+  return `
+    <tr class="skipped" data-grade="" data-score="-1" data-ticker="${s.ticker}">
+      <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${s.ticker}" target="_blank">${s.ticker}</a></span></td>
+      <td><span class="status-tag">${s.reason || 'no setup'}</span></td>
+      <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+    </tr>
+  `;
+}
+
+function renderTable(cfg) {
+  const setups = (cfg.setups || []).slice();
+  // Sort by grade tier, then |gap %| desc within tier
+  setups.sort((a, b) => {
+    const ga = GRADE_RANK[a.grade] ?? 9, gb = GRADE_RANK[b.grade] ?? 9;
+    if (ga !== gb) return ga - gb;
+    return Math.abs(b.gapPct||0) - Math.abs(a.gapPct||0);
+  });
+  const rows = setups.map(renderRow).join('') +
+               (cfg.skipped || []).map(renderSkippedRow).join('');
+  document.getElementById('table-body').innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Ticker</th>
+          <th>Grade</th>
+          <th>Mode</th>
+          <th>Dir</th>
+          <th>Price</th>
+          <th>Target</th>
+          <th>Gap</th>
+          <th>Strike</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderMeta(cfg) {
+  document.getElementById('expiry-tag').textContent = cfg.expiryLabel || '';
+  if (cfg.asOf) {
+    const d = new Date(cfg.asOf);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('generated').textContent =
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ET`;
+  }
+}
+
+// refresh button — copy command to clipboard + toast
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.refresh-btn');
+  if (!btn) return;
+  const cmd = btn.getAttribute('data-cmd') || '';
+  const toast = document.getElementById('toast');
+  const ok = () => {
+    if (!toast) return;
+    toast.innerHTML = `Copied — paste in terminal:<code>${cmd}</code>`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2400);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(ok).catch(() => ok());
+  } else {
+    ok();
+  }
+});
+
+renderMeta(CONFIG);
+renderTable(CONFIG);
+</script>
+</body>
+</html>

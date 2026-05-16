@@ -236,6 +236,95 @@
     border-radius: 3px;
   }
 
+  /* ──────── SIGNAL PANEL — universal notification feed ──────── */
+  .signal-panel {
+    margin-bottom: 14px;
+    background: var(--frame);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .signal-panel-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px;
+    background: var(--frame-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .signal-panel-title {
+    font-size: 10px; font-weight: 900; letter-spacing: 1.6px;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .signal-panel-count {
+    font-size: 10px; color: var(--text-dim); font-weight: 700;
+    letter-spacing: 1.2px; text-transform: uppercase;
+  }
+  .signal-panel-toggle {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--text-mute);
+    font-family: inherit;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .signal-panel-toggle:hover { color: var(--text); border-color: rgba(255,255,255,0.32); }
+  .signal-list { max-height: 0; overflow-y: auto; transition: max-height 0.2s; }
+  .signal-list.expanded { max-height: 360px; }
+  .signal-list.collapsed-5 { max-height: 165px; }
+  .signal-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .signal-row:last-child { border-bottom: none; }
+  .signal-row .sev-bar {
+    width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0;
+  }
+  .signal-row.sev-high.dir-up   .sev-bar { background: hsl(var(--pos-hue), 90%, 50%); }
+  .signal-row.sev-high.dir-down .sev-bar { background: hsl(var(--neg-hue), 90%, 50%); }
+  .signal-row.sev-high          .sev-bar { background: var(--accent); }
+  .signal-row.sev-medium        .sev-bar { background: rgba(251,191,36,0.5); }
+  .signal-row.sev-low           .sev-bar { background: rgba(255,255,255,0.18); }
+  .signal-row .sig-time {
+    color: var(--text-dim); font-weight: 700; font-size: 10px;
+    min-width: 56px; letter-spacing: 0.8px;
+  }
+  .signal-row .sig-ticker {
+    font-weight: 900; font-size: 11px; letter-spacing: -0.2px;
+    min-width: 40px; color: var(--text);
+  }
+  .signal-row .sig-code {
+    font-weight: 700; font-size: 9.5px;
+    letter-spacing: 1.2px; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 2px;
+    white-space: nowrap;
+    min-width: 96px; text-align: center;
+  }
+  .signal-row.code-entry-up    .sig-code { background: hsla(var(--pos-hue), 70%, 22%, 0.6); color: hsl(var(--pos-hue), 90%, 70%); }
+  .signal-row.code-entry-down  .sig-code { background: hsla(var(--neg-hue), 70%, 22%, 0.6); color: hsl(var(--neg-hue), 90%, 70%); }
+  .signal-row.code-pin-revert  .sig-code { background: rgba(251,191,36,0.15); color: var(--accent); }
+  .signal-row.code-compression-up   .sig-code { background: rgba(251,191,36,0.10); color: var(--accent); }
+  .signal-row.code-compression-down .sig-code { background: rgba(251,191,36,0.10); color: var(--accent); }
+  .signal-row.code-loosen      .sig-code { background: rgba(255,255,255,0.06); color: var(--text-mute); }
+  .signal-row.code-regime-flip .sig-code { background: hsla(var(--neg-hue), 70%, 22%, 0.6); color: hsl(var(--neg-hue), 90%, 70%); }
+  .signal-row.code-new-strike  .sig-code { background: hsla(var(--pos-hue), 70%, 22%, 0.5); color: hsl(var(--pos-hue), 90%, 70%); }
+  .signal-row .sig-text {
+    color: var(--text); font-weight: 500;
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .signal-empty {
+    padding: 14px; text-align: center; color: var(--text-mute);
+    font-size: 11px; font-weight: 500;
+  }
+
   /* ──────── COLUMN GRID ──────── */
   .columns {
     display: grid;
@@ -813,7 +902,8 @@
       <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
       <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
       <a href="screener.html" class="nav-link">Flow Screener</a>
-      <a href="scan.html" class="nav-link">EOW Scan</a>
+      <a href="scan.html" class="nav-link">Retail Scan</a>
+      <a href="mega-scan.html" class="nav-link">Mega-Cap Scan</a>
     </div>
   </div>
 </nav>
@@ -836,6 +926,16 @@
     </div>
   </div>
   <div class="toast" id="toast"></div>
+
+  <!-- Universal notification panel — populated by CONFIG.signals -->
+  <div class="signal-panel" id="signal-panel">
+    <div class="signal-panel-head">
+      <span class="signal-panel-title">Session Signals</span>
+      <span class="signal-panel-count" id="signal-count"></span>
+      <button class="signal-panel-toggle" id="signal-toggle" type="button" style="display:none;">Show all</button>
+    </div>
+    <div class="signal-list collapsed-5" id="signal-list"></div>
+  </div>
 
   <div class="columns" id="columns"></div>
 
@@ -1649,10 +1749,64 @@ function fmtDist(d) {
   return d.toFixed(1) + ' points';
 }
 
+// ─── Universal notification panel ──────────────────────────
+// Renders `cfg.signals` — a flat chronological list across all tickers.
+// Standardized format: time · ticker · code · text. Color-coded by severity.
+function renderSignals(cfg) {
+  const panel = document.getElementById('signal-panel');
+  const list  = document.getElementById('signal-list');
+  const countEl = document.getElementById('signal-count');
+  const toggle = document.getElementById('signal-toggle');
+  if (!panel || !list) return;
+
+  const signals = cfg.signals || [];
+  panel.style.display = 'block';   // always visible — empty state shown if no signals
+  if (!signals.length) {
+    countEl.textContent = '';
+    toggle.style.display = 'none';
+    list.classList.remove('collapsed-5', 'expanded');
+    list.classList.add('expanded');
+    list.innerHTML = `<div class="signal-empty">No session signals yet — waiting for state changes between UW snapshots.</div>`;
+    return;
+  }
+  countEl.textContent = `${signals.length} events`;
+
+  // Most recent first; full session is in the buffer.
+  const sorted = signals.slice().sort((a, b) =>
+    (b.time_iso || '').localeCompare(a.time_iso || ''));
+
+  // ENTRY/EXIT/PIN REVERT/REGIME FLIP/NEW STRIKE are loud; others quiet.
+  const codeToClass = c => 'code-' + (c || '').toLowerCase()
+    .replace(/[↑↓]/g, m => m === '↑' ? '-up' : '-down')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  list.innerHTML = sorted.map(s => `
+    <div class="signal-row sev-${s.severity} dir-${s.dir || 'none'} ${codeToClass(s.code)}">
+      <div class="sev-bar"></div>
+      <div class="sig-time">${s.time || ''}</div>
+      <div class="sig-ticker">${s.ticker || ''}</div>
+      <div class="sig-code">${s.code || ''}</div>
+      <div class="sig-text" title="${(s.text || '').replace(/"/g, '&quot;')}">${s.text || ''}</div>
+    </div>
+  `).join('');
+
+  // Default: collapsed to 5 rows. Toggle reveals all.
+  list.classList.add('collapsed-5');
+  toggle.textContent = signals.length > 5 ? 'Show all' : '';
+  toggle.style.display = signals.length > 5 ? '' : 'none';
+  toggle.onclick = () => {
+    const expanded = list.classList.toggle('expanded');
+    list.classList.toggle('collapsed-5', !expanded);
+    toggle.textContent = expanded ? 'Collapse' : 'Show all';
+  };
+}
+
 function render(cfg) {
   document.title = `Live Gamma · ${cfg.expiryLabel || 'Cross-Expiry'}`;
   renderTopMeta(cfg);
   renderConfluence(cfg);
+  renderSignals(cfg);
   const cols = document.getElementById('columns');
   cols.innerHTML = '';
   for (const [ticker, tk] of Object.entries(cfg.tickers || {})) {

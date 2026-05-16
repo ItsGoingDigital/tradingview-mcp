@@ -134,22 +134,76 @@ def normalize_row(r, side, today):
         if d is not None and 0 <= d <= 7:
             earnings_soon = f'{d}d' if d > 0 else 'TODAY'
 
+    spot = float(r.get('stock_price') or 0)
+    oi = int(r.get('open_interest') or 0)
+    premium = float(r.get('premium') or 0)
+    sweep = int(r.get('sweep_volume') or 0) > 0
+    dte = days_to(expiry, today) or 0
+    vol_oi = (volume / oi) if oi > 0 else float('inf')
+    move_pct = ((strike - spot) / spot * 100) if spot > 0 else 0  # signed: +OTM calls, −OTM puts
+
+    grade = grade_flow(
+        premium=premium, vol_oi=vol_oi, ask_perc=ask_perc,
+        sweep=sweep, dte=dte, move_pct=move_pct, cp=cp,
+    )
+
     return {
         'ticker':   ticker,
         'type':     cp,
         'strike':   strike,
-        'spot':     float(r.get('stock_price') or 0),
-        'dte':      days_to(expiry, today) or 0,
-        'premium':  float(r.get('premium') or 0),
+        'spot':     spot,
+        'dte':      dte,
+        'premium':  premium,
         'volume':   volume,
-        'oi':       int(r.get('open_interest') or 0),
+        'oi':       oi,
+        'vol_oi':   vol_oi if vol_oi != float('inf') else 999.0,
         'ask_perc': ask_perc,
-        'sweep':    int(r.get('sweep_volume') or 0) > 0,
+        'sweep':    sweep,
         'sector':   (r.get('sector') or '')[:24],
         'earnings_soon': earnings_soon,
         'last_fill': last_fill,
         'option_symbol': sym,
+        'move_pct': move_pct,
+        'grade':    grade,
     }
+
+
+# ─────────────────────────────────────────────────────────
+# Quality grading (mirror mega-scan approach: absolute thresholds
+# gate quality; magnitude (move%) is the rank)
+# ─────────────────────────────────────────────────────────
+def grade_flow(*, premium, vol_oi, ask_perc, sweep, dte, move_pct, cp):
+    """A / B / C / D / F based on conviction + sanity bounds.
+
+    A — institutional size, fresh positioning, aggressive buying, urgency
+    B — solid signal missing one A factor
+    C — tradeable but mid-conviction
+    D — meets minimum thresholds, low confidence
+    F — outside sane bounds (move% too extreme, etc.)
+
+    move_pct sweet spot for calls: +1.5% to +6% OTM (room to run, not lottery)
+    move_pct sweet spot for puts:  −6% to −1.5% OTM (mirror)
+    """
+    abs_move = abs(move_pct)
+    if abs_move > 12 or abs_move < 0.3:
+        return 'F'   # too far OTM = lottery; too close = ATM noise
+
+    in_sweet = 1.5 <= abs_move <= 6.0
+    # A: heavy premium + very fresh + aggressive + urgency + sweet OTM band + short DTE
+    if (premium >= 500_000 and vol_oi >= 5.0 and ask_perc >= 0.80
+            and sweep and in_sweet and dte <= 2):
+        return 'A'
+    # B: solid premium + fresh + aggressive + sweet band (one factor can relax)
+    if (premium >= 250_000 and vol_oi >= 3.0 and ask_perc >= 0.70 and in_sweet):
+        return 'B'
+    # C: meets minimum thresholds + acceptable move band
+    if (premium >= 100_000 and vol_oi >= 1.5 and ask_perc >= 0.65
+            and 1.0 <= abs_move <= 8.0):
+        return 'C'
+    # D: marginal — keep visible but flagged
+    if premium >= 100_000 and 0.5 <= abs_move <= 10.0:
+        return 'D'
+    return 'F'
 
 
 # ─────────────────────────────────────────────────────────
@@ -169,11 +223,14 @@ def build_config_js(filters, calls, puts):
                 f"premium: {int(round(r['premium']))}, "
                 f"volume: {r['volume']}, "
                 f"oi: {r['oi']}, "
+                f"vol_oi: {r['vol_oi']:.2f}, "
                 f"ask_perc: {r['ask_perc']:.4f}, "
                 f"sweep: {'true' if r['sweep'] else 'false'}, "
                 f"sector: {json.dumps(r['sector'])}, "
                 f"earnings_soon: {json.dumps(r['earnings_soon'])}, "
-                f"last_fill: {json.dumps(r['last_fill'])}"
+                f"last_fill: {json.dumps(r['last_fill'])}, "
+                f"move_pct: {r['move_pct']:.2f}, "
+                f"grade: '{r['grade']}'"
                 ' }')
 
     calls_block = '[\n    ' + ',\n    '.join(js_row(r) for r in calls) + '\n  ]' if calls else '[]'
@@ -245,35 +302,50 @@ def main():
 
     today = datetime.now().date()
 
+    # Sort key: grade tier first (A < B < C), then |move%| desc (bigger move wins within tier).
+    # F's are dropped — they failed sanity bounds and shouldn't display.
+    GRADE_RANK = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'F': 4}
+    def rank_key(r):
+        return (GRADE_RANK.get(r['grade'], 9), -abs(r['move_pct']))
+
     print(f'[Screener] Pulling bullish calls (max_dte={args.max_dte}, prem≥${args.min_premium:,})…')
     raw_calls = fetch_uw('/api/screener/option-contracts',
                          {**base_params, 'type': 'Calls'}, token)
     calls = [n for n in (normalize_row(r, 'calls', today) for r in raw_calls) if n]
-    calls.sort(key=lambda x: x['premium'], reverse=True)
-    print(f'  {len(calls)} contracts kept')
+    calls = [c for c in calls if c['grade'] != 'F']
+    calls.sort(key=rank_key)
+    print(f'  {len(calls)} contracts kept  '
+          f"({sum(1 for c in calls if c['grade']=='A')}A "
+          f"{sum(1 for c in calls if c['grade']=='B')}B "
+          f"{sum(1 for c in calls if c['grade']=='C')}C "
+          f"{sum(1 for c in calls if c['grade']=='D')}D)")
 
     print(f'[Screener] Pulling bearish puts (max_dte={args.max_dte}, prem≥${args.min_premium:,})…')
     raw_puts = fetch_uw('/api/screener/option-contracts',
                         {**base_params, 'type': 'Puts'}, token)
     puts = [n for n in (normalize_row(r, 'puts', today) for r in raw_puts) if n]
-    puts.sort(key=lambda x: x['premium'], reverse=True)
-    print(f'  {len(puts)} contracts kept')
+    puts = [p for p in puts if p['grade'] != 'F']
+    puts.sort(key=rank_key)
+    print(f'  {len(puts)} contracts kept  '
+          f"({sum(1 for c in puts if c['grade']=='A')}A "
+          f"{sum(1 for c in puts if c['grade']=='B')}B "
+          f"{sum(1 for c in puts if c['grade']=='C')}C "
+          f"{sum(1 for c in puts if c['grade']=='D')}D)")
 
     config_js = build_config_js(filters_for_template, calls, puts)
     patch_html(config_js)
     print(f'\n✓ Rendered {RENDERED_PATH}')
 
-    # Quick top-3 each side preview
+    # Quick top-3 each side preview (sorted A→D by grade, then magnitude)
     for side, rows in (('Calls', calls), ('Puts', puts)):
         if not rows:
             continue
         print(f'\n  Top 3 {side}:')
         for r in rows[:3]:
-            money = (r['strike'] - r['spot']) / r['spot'] * 100
-            sign = '+' if money >= 0 else ''
-            print(f"    {r['ticker']:6} {r['type']} ${r['strike']:>7}  spot ${r['spot']:>7.2f}  "
-                  f"{sign}{money:>5.1f}% OTM  prem ${r['premium']/1e6:.2f}M  "
-                  f"vol {r['volume']/1000:.1f}k/OI {r['oi']/1000:.1f}k  "
+            sign = '+' if r['move_pct'] >= 0 else ''
+            print(f"    [{r['grade']}] {r['ticker']:6} {r['type']} ${r['strike']:>7}  "
+                  f"spot ${r['spot']:>7.2f}  {sign}{r['move_pct']:>5.1f}%  "
+                  f"prem ${r['premium']/1e6:.2f}M  vol/OI {r['vol_oi']:>4.1f}x  "
                   f"ask {r['ask_perc']*100:.0f}%  dte {r['dte']}d")
 
     if not os.environ.get('GAMMA_NO_OPEN'):

@@ -27,7 +27,8 @@ from urllib.error import HTTPError
 
 # Local modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from store_snapshot import store_snapshot
+from store_snapshot import store_snapshot, get_session_snapshots
+from signal_engine import detect_session_signals
 from uw_gex import pull_spot_gex
 from strat import match_3_candle_setup
 import tv_helpers as tv
@@ -477,7 +478,7 @@ def persist(ticker_data, expiry_iso):
 # ─────────────────────────────────────────────────────────
 # CONFIG block rewriter
 # ─────────────────────────────────────────────────────────
-def build_config_js(per_ticker, confluence, expiry_iso):
+def build_config_js(per_ticker, confluence, expiry_iso, signals=None):
     now = datetime.now()
     today_iso = now.strftime('%Y-%m-%d')
     expiry_label = f'Aggregate · {now.strftime("%-m/%-d")}'
@@ -579,6 +580,8 @@ def build_config_js(per_ticker, confluence, expiry_iso):
         f"sources [{sources_str}] · snapshots persisted to Supabase."
     ).replace("'", "\\'")
 
+    signals_js = json.dumps(signals or [], default=str)
+
     return f"""const CONFIG = {{
   expiry: '{expiry_iso}',
   expiryLabel: '{expiry_label}',
@@ -588,6 +591,7 @@ def build_config_js(per_ticker, confluence, expiry_iso):
   tickers: {{
 {tickers_js}
   }},
+  signals: {signals_js},
 }};"""
 
 
@@ -597,7 +601,7 @@ def patch_html(config_js):
     pattern = r'const CONFIG = \{[\s\S]*?\n\};'
     if not re.search(pattern, html):
         sys.exit(f'Could not find CONFIG block in {TEMPLATE_PATH}')
-    new_html = re.sub(pattern, config_js, html, count=1)
+    new_html = re.sub(pattern, lambda _: config_js, html, count=1)
     os.makedirs(os.path.dirname(RENDERED_PATH), exist_ok=True)
     with open(RENDERED_PATH, 'w') as f:
         f.write(new_html)
@@ -799,6 +803,24 @@ def main():
         except Exception as e:
             print(f'  ! {ticker} persistence failed: {e}', file=sys.stderr)
 
+    # 3a.5. Notification signals — accumulate today's session by diffing
+    # consecutive Supabase snapshots per ticker. Interleaved chronologically.
+    session_signals = []
+    try:
+        # Session window: today's 9:30 ET = 13:30 UTC (Z suffix — '+' breaks URL encoding)
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        since_iso = f'{today}T13:30:00Z'
+        snaps = get_session_snapshots(list(per_ticker.keys()), since_iso)
+        session_signals = detect_session_signals(snaps)
+        if session_signals:
+            print(f'\nSession signals ({len(session_signals)} events):')
+            for s in session_signals[-8:]:
+                print(f'  {s["time"]} · {s["ticker"]} · {s["code"]} · {s["text"]}')
+        else:
+            print('\nSession signals: none yet (need ≥2 snapshots per ticker)')
+    except Exception as e:
+        print(f'  ! signal engine failed: {e}', file=sys.stderr)
+
     # 3b. TV drawings — for each pane: clear, draw S&D on DAILY, switch back
     # to original intraday TF, draw gamma + POC. Daily zones stay visible
     # across all timeframes because TV preserves drawings per pane.
@@ -816,7 +838,7 @@ def main():
         print(f'  ✓ pane {cfg["pane"]} ({ticker}): gamma lines (POC + {len(data.get("weekly_zones") or [])} zones from indicators)')
 
     # 3c. Render HTML once with the full picture
-    config_js = build_config_js(per_ticker, confluence, expiry_iso)
+    config_js = build_config_js(per_ticker, confluence, expiry_iso, session_signals)
     patch_html(config_js)
     print(f'\n✓ Rendered {RENDERED_PATH}')
 

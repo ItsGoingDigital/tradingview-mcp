@@ -29,6 +29,7 @@ from urllib.error import HTTPError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from uw_gex import pull_spot_gex
+from gamma_scoring import score_ticker
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_PATH = os.path.join(_REPO_ROOT, 'charts', 'templates', 'scan.html')
@@ -88,18 +89,29 @@ def mention_velocity_score(mentions, mentions_24h):
 # ──────────────────────────────────────────────────────────
 # UW helpers
 # ──────────────────────────────────────────────────────────
-def fetch_uw_json(endpoint, token):
-    req = Request(
-        f'https://api.unusualwhales.com{endpoint}',
-        headers={'Authorization': f'Bearer {token}', 'UW-CLIENT-API-ID': '100001'},
-    )
-    try:
-        with urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except HTTPError as e:
-        return None
-    except Exception:
-        return None
+def fetch_uw_json(endpoint, token, retries=3):
+    """Fetch UW with retry on 429 (rate limit). UW caps at 3 concurrent
+    requests; bursts from parallel workers trip this constantly. Silent
+    failure was causing real-EOW tickers (like MU) to mis-flag no-eow."""
+    import time
+    url = f'https://api.unusualwhales.com{endpoint}'
+    headers = {'Authorization': f'Bearer {token}', 'UW-CLIENT-API-ID': '100001'}
+    for attempt in range(retries + 1):
+        req = Request(url, headers=headers)
+        try:
+            with urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read())
+        except HTTPError as e:
+            if e.code == 429 and attempt < retries:
+                time.sleep(0.5 * (2 ** attempt))   # 0.5s, 1s, 2s
+                continue
+            return None
+        except Exception:
+            if attempt < retries:
+                time.sleep(0.3)
+                continue
+            return None
+    return None
 
 
 def find_eow_expiry(ticker, token, target_date):
@@ -324,10 +336,11 @@ def scan_one(ape_row, token, target_date_iso):
     levels = derive_levels(strikes_net, price)
 
     velocity = mention_velocity_score(ape_row['mentions'], ape_row['mentions_24h'])
-    # Pure-distance grading: bright-yellow star + sweet-spot distance band.
-    # No regime weighting, no Reddit mention-velocity weighting. Just the
-    # dominance map says where the magnet is.
-    scored = score_by_star_distance(strikes_net, price)
+
+    # Unified scoring — same logic mega-scan uses. Directional magnet filter
+    # (positive gex above price = call magnet, negative below = put magnet),
+    # magnitude floor, regime-aware mode (PIN vs BREAKOUT).
+    scored = score_ticker(t, ape_row['name'], strikes_net, price)
 
     result.update({
         'price':           price,
@@ -336,14 +349,24 @@ def scan_one(ape_row, token, target_date_iso):
         'wall_up':         levels['wall_up'][0]  if levels.get('wall_up') else None,
         'wall_down':       levels['wall_down'][0] if levels.get('wall_down') else None,
         'put_mag':         levels['put_mag'][0]  if levels.get('put_mag') else None,
-        'regime':          levels.get('regime'),
+        'regime':          scored.get('regime') or levels.get('regime'),
         'velocity_score':  round(velocity, 2),
+        'grade':           scored.get('grade', 'F'),
+        'mode':            scored.get('mode'),
+        'direction':       scored.get('direction'),   # 'LONG' | 'SHORT' | None
+        'target':          scored.get('target'),
+        'gap_pct':         round(scored['gap_pct'], 2) if scored.get('gap_pct') is not None else None,
+        'path_clarity':    round(scored['path_clarity'], 3) if scored.get('path_clarity') is not None else None,
+        'suggested_strike': scored.get('suggested_strike'),
+        'skip_reason':     scored.get('skip_reason'),
     })
-    if scored is None:
+
+    # Score = absolute gap %, used for ranking within the same grade tier
+    if scored.get('gap_pct') is not None:
+        result['score'] = round(abs(scored['gap_pct']), 2)
+    else:
         result['status'] = 'unscorable'
-        result['reason'] = 'No usable strikes for scoring'
-        return result
-    result.update(scored)
+        result['reason'] = scored.get('skip_reason', 'No qualifying magnet')
     return result
 
 
@@ -354,15 +377,17 @@ def build_config_js(scanned, top_n, target_date_iso):
     rows = []
     for r in scanned:
         def s(v):
-            return 'null' if v is None else (f'"{v}"' if isinstance(v, str) else str(v))
+            # json.dumps handles embedded quotes / backslashes / unicode safely.
+            # Critical for error messages from UW (which embed JSON fragments).
+            if v is None:
+                return 'null'
+            if isinstance(v, str):
+                return json.dumps(v)
+            return str(v)
         rows.append(
             '{ '
-            f'rank: {r["rank"]}, '
             f'ticker: {s(r["ticker"])}, '
             f'name: {s(r.get("name",""))}, '
-            f'mentions: {r["mentions"]}, '
-            f'mentions_24h: {r["mentions_24h"]}, '
-            f'rank_24h: {r["rank_24h"]}, '
             f'status: {s(r.get("status"))}, '
             f'reason: {s(r.get("reason"))}, '
             f'price: {s(r.get("price"))}, '
@@ -371,13 +396,14 @@ def build_config_js(scanned, top_n, target_date_iso):
             f'wall_down: {s(r.get("wall_down"))}, '
             f'put_mag: {s(r.get("put_mag"))}, '
             f'regime: {s(r.get("regime"))}, '
-            f'velocity_score: {s(r.get("velocity_score"))}, '
-            f'score: {s(r.get("score"))}, '
-            f'grade: {s(r.get("grade"))}, '
+            f'mode: {s(r.get("mode"))}, '
             f'direction: {s(r.get("direction"))}, '
-            f'target_price: {s(r.get("target_price"))}, '
+            f'target: {s(r.get("target"))}, '
             f'gap_pct: {s(r.get("gap_pct"))}, '
-            f'dominance: {s(r.get("dominance"))} '
+            f'path_clarity: {s(r.get("path_clarity"))}, '
+            f'suggested_strike: {s(r.get("suggested_strike"))}, '
+            f'score: {s(r.get("score"))}, '
+            f'grade: {s(r.get("grade"))} '
             '}'
         )
     rows_js = '[\n    ' + ',\n    '.join(rows) + '\n  ]'
@@ -408,7 +434,7 @@ def patch_html(config_js):
 def main():
     ap = argparse.ArgumentParser(description='EOW asymmetric-breakout scan.')
     ap.add_argument('--top', type=int, default=25, help='Top N from ApeWisdom WSB')
-    ap.add_argument('--workers', type=int, default=6, help='Parallel UW pulls')
+    ap.add_argument('--workers', type=int, default=3, help='Parallel UW pulls (UW caps at 3 concurrent)')
     args = ap.parse_args()
 
     token = os.environ.get('UW_API_TOKEN')
@@ -447,11 +473,14 @@ def main():
             print(f'  [{mark:>2}] {r["ticker"]:<7} {r.get("status","ok"):<12} '
                   f'{("$"+str(r.get("price","")))[:9]:<10} score={r.get("score","-")}')
 
-    # Sort: scored tickers first by score desc, then no-eow/unscorable at bottom alphabetical
+    # Sort: by grade tier (A → F), then by |gap_pct| desc within each tier.
+    # Skipped rows (no-eow, no-data, pull-failed) at the very bottom alphabetical.
+    _GRADE_RANK = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'F': 4}
     def sort_key(r):
-        if r.get('score') is not None:
-            return (0, -r['score'])
-        return (1, r['ticker'])
+        g = r.get('grade')
+        if g in _GRADE_RANK:
+            return (0, _GRADE_RANK[g], -abs(r.get('gap_pct') or 0))
+        return (1, 9, r['ticker'])
     scanned.sort(key=sort_key)
 
     elapsed = (datetime.now() - started).total_seconds()
@@ -466,8 +495,9 @@ def main():
     if a_grade:
         print('\nGrade-A picks:')
         for r in a_grade:
-            arrow = '↑' if r['direction'] == 'up' else '↓'
-            print(f"  {r['ticker']:<6} {arrow} target ${r['target_price']:g} "
+            arrow = '↑' if r.get('direction') == 'LONG' else '↓'
+            tgt = r.get('target') or r.get('target_price') or 0
+            print(f"  {r['ticker']:<6} {arrow} {r.get('mode','')} target ${tgt:g} "
                   f"({r['gap_pct']:+.1f}%)  velocity={r['velocity_score']}")
     else:
         print('\nNo grade-A picks today.')

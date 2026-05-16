@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>EOW Asymmetric Breakout Scan</title>
+<title>Retail Scan · Gamma</title>
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
 <style>
@@ -267,6 +267,19 @@
   .regime-pill.positive { background: hsla(var(--pos-hue), 70%, 20%, 0.6); color: hsl(var(--pos-hue), 90%, 70%); }
   .regime-pill.negative { background: hsla(var(--neg-hue), 70%, 20%, 0.6); color: hsl(var(--neg-hue), 90%, 70%); }
 
+  /* Mode pill — PIN (positive gamma) vs BREAKOUT (negative gamma) */
+  .mode-pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .mode-pill.pin      { background: rgba(251,191,36,0.12); color: var(--accent); border: 1px solid rgba(251,191,36,0.32); }
+  .mode-pill.breakout { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid rgba(255,255,255,0.28); }
+
   /* Footer copy */
   .footnote {
     margin-top: 18px;
@@ -296,7 +309,8 @@
       <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
       <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
       <a href="screener.html" class="nav-link">Flow Screener</a>
-      <a href="scan.html" class="nav-link active">EOW Scan</a>
+      <a href="scan.html" class="nav-link active">Retail Scan</a>
+      <a href="mega-scan.html" class="nav-link">Mega-Cap Scan</a>
     </div>
   </div>
 </nav>
@@ -304,8 +318,8 @@
 <div class="container">
   <div class="header">
     <div class="header-left">
-      <span class="title">EOW Asymmetric Scan</span>
-      <span class="title-sub" id="title-sub">WSB Top-N · Asymmetric Breakout</span>
+      <span class="title">Retail Scan</span>
+      <span class="title-sub" id="title-sub">Ranked by expected move to magnet</span>
     </div>
     <div class="header-right">
       <span class="meta-tag" id="filter-tag"></span>
@@ -319,26 +333,22 @@
   </div>
   <div class="toast" id="toast"></div>
 
-  <div class="summary" id="summary"></div>
-
   <div id="table-body"></div>
 
   <div class="footnote">
-    <strong>How to read this:</strong> tickers come from ApeWisdom's WSB top-N
-    list (live). For each, we pull the EOW (this-Friday) options chain from
-    Unusual Whales, derive gamma levels with the same proximity filters used
-    on the heatmaps, and score on an <strong>asymmetric-breakout rubric</strong>:
-    <code>asymmetry × regime alignment × mention velocity</code>.
-    <br><br>
-    Higher score means: one structural side is far wider than the other (the
-    target), the gamma regime aligns with that direction, and Reddit attention
-    is building. Score is deterministic — same data always yields the same
-    grade.
+    <strong>How to read this:</strong> for each ticker we pull the EOW
+    (this-Friday) options chain from Unusual Whales and score it on the same
+    gamma rubric used by the Mega Scan: <strong>cluster detection</strong>,
+    <strong>directional magnet filter</strong>, <strong>magnitude floor</strong>,
+    and <strong>regime-aware mode</strong> (PIN for positive gamma, BREAKOUT
+    for negative). Rows are ranked by grade tier (A → D), then by expected
+    move % within tier. Score is deterministic — same data always yields
+    the same grade.
     <br><br>
     <strong>Status meanings:</strong>
     <code>no-eow</code> = ticker has no Friday option chain (small caps, ADRs);
-    <code>unscorable</code> = no structural anchors (no walls or put magnet within
-    proximity bands);
+    <code>unscorable</code> = no qualifying magnet (no material cluster above or
+    below price within proximity bands);
     <code>error</code> = UW pull failed (retry).
   </div>
 </div>
@@ -370,8 +380,11 @@ function fmtNum(v) {
 }
 
 function renderRow(r) {
-  // Status row (no-eow, unscorable, error) — render minimal
-  if (r.grade == null) {
+  // Status row (no-eow, unscorable, error) — render minimal.
+  // Detect via status (not grade) because the shared scorer now writes
+  // grade='F' for unscorable cases instead of leaving it null.
+  const isSkipped = r.status && r.status !== 'ok';
+  if (isSkipped || r.grade == null) {
     const statusLabel = ({
       'no-eow':     'no EOW chain',
       'unscorable': 'no anchors',
@@ -381,35 +394,34 @@ function renderRow(r) {
     })[r.status] || r.status || '—';
     return `
       <tr class="skipped" data-grade="" data-score="-1" data-ticker="${r.ticker}">
-        <td>${r.rank}</td>
         <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${r.ticker}" target="_blank">${r.ticker}</a><span class="ticker-name">${r.name || ''}</span></span></td>
         <td><span class="status-tag">${statusLabel}</span></td>
-        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
-        <td>${fmtNum(r.mentions)}</td>
-        <td>—</td>
+        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
       </tr>`;
   }
-  // Scored row
-  const arrowClass = r.direction === 'up' ? 'dir-up' : 'dir-down';
-  const arrow = r.direction === 'up' ? '↑' : '↓';
+  // Scored row — schema unified with mega-scan. Pure gamma read.
+  const dir = r.direction;   // 'LONG' | 'SHORT' | null
+  const arrowClass = dir === 'LONG' ? 'dir-up' : 'dir-down';
+  const arrow = dir === 'LONG' ? '↑' : (dir === 'SHORT' ? '↓' : '—');
+  const dirLabel = dir || '—';
+  const modePill = r.mode ? `<span class="mode-pill ${r.mode.toLowerCase()}">${r.mode}</span>` : '—';
   const regimePill = r.regime ? `<span class="regime-pill ${r.regime}">${r.regime === 'positive' ? 'Pos' : 'Neg'}</span>` : '—';
-  const velClass = r.velocity_score >= 0.5 ? 'hot' : 'cool';
-  const velIcon = r.velocity_score >= 0.7 ? '🔥' : (r.velocity_score >= 0.3 ? '↑' : '·');
-  const rankDelta = (r.rank_24h && r.rank_24h !== r.rank) ? (r.rank_24h - r.rank) : 0;
-  const rankNote = rankDelta > 0 ? `<span style="color:var(--text-dim);font-size:10px;"> +${rankDelta}</span>` : '';
+  const target = r.target != null ? r.target : r.target_price;
+  const pathStr = r.path_clarity != null ? `${Math.round(r.path_clarity * 100)}%` : '—';
+  const strikeStr = r.suggested_strike != null ? `$${r.suggested_strike}` : '—';
 
   return `
     <tr data-grade="${r.grade}" data-score="${r.score}" data-ticker="${r.ticker}">
-      <td>${r.rank}${rankNote}</td>
       <td class="left"><span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${r.ticker}" target="_blank">${r.ticker}</a><span class="ticker-name">${r.name || ''}</span></span></td>
       <td><span class="grade ${r.grade}">${r.grade}</span></td>
-      <td><span class="${arrowClass}">${arrow}</span></td>
+      <td>${modePill}</td>
+      <td><span class="${arrowClass}">${arrow} ${dirLabel}</span></td>
       <td>${fmtPrice(r.price)}</td>
-      <td>${fmtPrice(r.target_price)}</td>
+      <td>${fmtPrice(target)}</td>
       <td>${fmtPct(r.gap_pct)}</td>
+      <td>${strikeStr}</td>
+      <td>${pathStr}</td>
       <td>${regimePill}</td>
-      <td>${fmtNum(r.mentions)}</td>
-      <td><span class="velocity ${velClass}"><span class="vel-icon">${velIcon}</span>${(r.velocity_score * 100).toFixed(0)}</span></td>
     </tr>
   `;
 }
@@ -441,16 +453,16 @@ function renderTable(scanned) {
     <table>
       <thead>
         <tr>
-          <th data-sort="rank" class="sort-arrow">Rank</th>
           <th data-sort="ticker" class="left sort-arrow">Ticker</th>
           <th data-sort="grade" class="sort-desc">Grade</th>
+          <th data-sort="mode" class="sort-arrow">Mode</th>
           <th data-sort="direction" class="sort-arrow">Dir</th>
           <th data-sort="price" class="sort-arrow">Price</th>
-          <th data-sort="target_price" class="sort-arrow">Target</th>
+          <th data-sort="target" class="sort-arrow">Target</th>
           <th data-sort="gap_pct" class="sort-arrow">Gap</th>
+          <th data-sort="suggested_strike" class="sort-arrow">Strike</th>
+          <th data-sort="path_clarity" class="sort-arrow">Path</th>
           <th data-sort="regime" class="sort-arrow">Regime</th>
-          <th data-sort="mentions" class="sort-arrow">Mentions</th>
-          <th data-sort="velocity_score" class="sort-arrow">Velocity</th>
         </tr>
       </thead>
       <tbody id="tbody">${rows}</tbody>
@@ -458,8 +470,8 @@ function renderTable(scanned) {
 }
 
 function render(cfg) {
-  document.title = `EOW Scan · ${cfg.targetDate || 'pending'}`;
-  document.getElementById('title-sub').textContent = `WSB Top ${cfg.topN} · Asymmetric Breakout`;
+  document.title = `Retail Scan · ${cfg.targetDate || 'pending'}`;
+  document.getElementById('title-sub').textContent = `${cfg.scanned.length} tickers scanned · Ranked by expected move to magnet`;
   document.getElementById('filter-tag').textContent = `EOW ${cfg.targetDate || ''}`;
   if (cfg.asOf) {
     const d = new Date(cfg.asOf);
@@ -467,7 +479,6 @@ function render(cfg) {
     document.getElementById('generated').textContent =
       `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ET`;
   }
-  renderSummary(cfg.scanned || []);
   renderTable(cfg.scanned || []);
 }
 

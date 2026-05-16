@@ -241,6 +241,25 @@
   /* 0DTE is an urgency flag, not a put/decrease signal — amber, not red */
   .badge.dte0 { background: rgba(251,191,36,0.15); color: var(--accent); }
   .badge.sector { background: rgba(255,255,255,0.04); color: var(--text-mute); }
+
+  /* Grade pills — mirror mega-scan grading aesthetic */
+  .grade-pill {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
+  .grade-pill.grade-A { background: rgba(251,191,36,0.18); color: #fde047; border: 1px solid rgba(251,191,36,0.55); }
+  .grade-pill.grade-B { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid rgba(255,255,255,0.32); }
+  .grade-pill.grade-C { background: rgba(255,255,255,0.03); color: var(--text-mute); border: 1px solid rgba(255,255,255,0.18); }
+  .grade-pill.grade-D { background: rgba(255,255,255,0.02); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.10); }
+  .move-cell { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .move-cell.pos { color: hsl(var(--pos-hue), 90%, 60%); }
+  .move-cell.neg { color: hsl(var(--neg-hue), 90%, 60%); }
   .time-cell {
     font-size: 10.5px;
     color: var(--text-dim);
@@ -329,7 +348,8 @@
       <a href="gamma-heatmap-0dte.html" class="nav-link">SPX 0DTE</a>
       <a href="gamma-heatmap.html" class="nav-link">Weekly Stock</a>
       <a href="screener.html" class="nav-link active">Flow Screener</a>
-      <a href="scan.html" class="nav-link">EOW Scan</a>
+      <a href="scan.html" class="nav-link">Retail Scan</a>
+      <a href="mega-scan.html" class="nav-link">Mega-Cap Scan</a>
     </div>
   </div>
 </nav>
@@ -413,40 +433,40 @@ function urgentInfo(row) {
 }
 
 function renderRow(row, side) {
-  const moneyness = ((row.strike - row.spot) / row.spot * 100);
-  const moneynessStr = `${moneyness >= 0 ? '+' : ''}${moneyness.toFixed(1)}%`;
+  const movePct = row.move_pct != null ? row.move_pct : ((row.strike - row.spot) / row.spot * 100);
+  const moveClass = movePct >= 0 ? 'pos' : 'neg';
+  const moveStr = `${movePct >= 0 ? '+' : ''}${movePct.toFixed(1)}%`;
   const dte = row.dte;
   const dteStr = dte === 0 ? '0DTE' : `${dte}d`;
   const askPercClass = row.ask_perc >= 0.80 ? 'hot' : (row.ask_perc >= 0.65 ? 'hot' : 'cold');
   const premHuge = row.premium >= 1_000_000;
-  const urg = urgentInfo(row);
+  const grade = row.grade || 'C';
 
   const badges = [];
-  if (urg.isUrgent) {
-    const tooltip = `Hit ${urg.passedCount}/5: ${urg.reasons.join(', ')}`;
-    badges.push(`<span class="urgent ${side}" title="${tooltip}">⚡ Urgent</span>`);
-  }
   if (dte === 0) badges.push(`<span class="badge dte0">0DTE</span>`);
   if (row.sweep) badges.push(`<span class="badge sweep">SWEEP</span>`);
   if (row.earnings_soon) badges.push(`<span class="badge earnings">EARN ${row.earnings_soon}</span>`);
   if (row.sector) badges.push(`<span class="badge sector">${row.sector}</span>`);
 
-  const rowClass = urg.isUrgent ? `urgent-row ${side}` : '';
+  const rowClass = grade === 'A' ? `urgent-row ${side}` : '';
+  const volOiStr = row.vol_oi != null ? `${row.vol_oi.toFixed(1)}×` : '';
 
   return `
     <tr class="${rowClass}">
+      <td><span class="grade-pill grade-${grade}">${grade}</span></td>
       <td class="left">
         <span class="ticker"><a href="https://www.tradingview.com/chart/?symbol=${row.ticker}" target="_blank">${row.ticker}</a></span>
       </td>
       <td class="left">
         <span class="contract">
           <span class="ctype ${row.type}">${row.type}</span><span class="strike">$${row.strike}</span>
-          <span class="moneyness"> · ${moneynessStr} · ${dteStr}</span>
+          <span class="moneyness"> · ${dteStr}</span>
         </span>
       </td>
       <td><span class="spot">$${row.spot.toFixed(2)}</span></td>
+      <td><span class="move-cell ${moveClass}">${moveStr}</span></td>
       <td><span class="premium ${premHuge ? 'huge' : ''}">${fmtMoney(row.premium)}</span></td>
-      <td>${fmtVol(row.volume)} <span class="vol-oi">/ ${fmtVol(row.oi)} oi</span></td>
+      <td>${fmtVol(row.volume)} <span class="vol-oi">/ ${fmtVol(row.oi)} oi  (${volOiStr})</span></td>
       <td><span class="ask-perc ${askPercClass}">${fmtPct(row.ask_perc)}</span></td>
       <td class="left"><span class="badges">${badges.join('')}</span></td>
       <td><span class="time-cell">${row.last_fill || ''}</span></td>
@@ -465,9 +485,11 @@ function renderSection(rows, bodyId, countId, side) {
     <table>
       <thead>
         <tr>
+          <th>Grade</th>
           <th class="left">Ticker</th>
           <th class="left">Contract</th>
           <th>Spot</th>
+          <th>Move %</th>
           <th>Premium</th>
           <th>Vol / OI</th>
           <th>Ask %</th>
