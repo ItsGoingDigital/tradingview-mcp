@@ -1,0 +1,175 @@
+// Derived from "Market Structure CHoCH/BOS (Fractal) [LuxAlgo]" — CC BY-NC-SA 4.0
+// © LuxAlgo (original) — https://creativecommons.org/licenses/by-nc-sa/4.0/
+//
+// Modifications by repo author for personal-use automation:
+//   1. Added webhook secret input + alert() emission on new zones and mitigation.
+//   2. Forced support/resistance line computation regardless of display toggle
+//      (the dashed line is our SL — must always exist).
+//   3. Stored live zones in arrays so multi-zone mitigation tracks correctly
+//      (upstream replaces the single `lower_lvl` reference each event).
+//   4. Uses UDTs for zones.
+//
+// This derivative is licensed under CC BY-NC-SA 4.0. Private use only;
+// do not redistribute without honoring the ShareAlike clause.
+//
+// Stays on Pine v5 to match upstream and avoid v6's stricter type inference
+// (which would force a refactor of `var p = int(length/2)` to satisfy the
+// `simple int` requirement on `dh[p]` historical access). The v5
+// "outdated" warning is informational; TradingView still runs v5 scripts.
+
+//@version=5
+indicator("Lux MS Alerter", "Lux MS Alerter", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+length     = input.int(5, "Fractal length", minval = 3)
+secret     = input.string("", "Webhook shared secret", confirm = true)
+showBull   = input(true, 'Bullish Structures', inline = 'bull', group = 'Style')
+bullCss    = input.color(#089981, '', inline = 'bull', group = 'Style')
+showBear   = input(true, 'Bearish Structures', inline = 'bear', group = 'Style')
+bearCss    = input.color(#f23645, '', inline = 'bear', group = 'Style')
+showSL     = input(true, 'Draw zone SL (dashed lines)', group = 'Style')
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+type Fractal
+    float value
+    int   loc
+    bool  iscrossed
+
+type Zone
+    string id
+    string direction   // "long" | "short"
+    float  entry       // proximal edge = ChoCh/BoS break price
+    float  sl          // distal edge   = deepest pullback between fractal & break
+    line   sl_line     // for live x2 extension + visual
+    bool   mitigated
+
+// ─── Fractal detection (verbatim from upstream) ──────────────────────────────
+var p = int(length / 2)
+n = bar_index
+
+dh = math.sum(math.sign(high - high[1]), p)
+dl = math.sum(math.sign(low  - low[1]),  p)
+
+bullf = dh == -p and dh[p] == p  and high[p] == ta.highest(length)
+bearf = dl ==  p and dl[p] == -p and low[p]  == ta.lowest(length)
+
+// ─── Alert emission ──────────────────────────────────────────────────────────
+emit(string evt, Zone z) =>
+    payload = '{"symbol":"' + syminfo.tickerid + '"' +
+              ',"tf":"' + timeframe.period + '"' +
+              ',"event":"' + evt + '"' +
+              ',"id":"' + z.id + '"' +
+              ',"direction":"' + z.direction + '"' +
+              ',"entry":' + str.tostring(z.entry, format.mintick) +
+              ',"sl":' + str.tostring(z.sl, format.mintick) +
+              ',"ts":' + str.tostring(time) +
+              ',"secret":"' + secret + '"}'
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─── State ───────────────────────────────────────────────────────────────────
+var Fractal upper       = Fractal.new()
+var Fractal lower       = Fractal.new()
+var int     os          = 0
+var array<Zone> bull_zones = array.new<Zone>()
+var array<Zone> bear_zones = array.new<Zone>()
+
+// Track the latest fractal pivot value (verbatim trigger from upstream).
+if bullf
+    upper.value := high[p]
+    upper.loc   := n - p
+    upper.iscrossed := false
+
+if bearf
+    lower.value := low[p]
+    lower.loc   := n - p
+    lower.iscrossed := false
+
+// ─── Bullish event (ChoCh up / BoS up) ───────────────────────────────────────
+if ta.crossover(close, upper.value) and not upper.iscrossed
+    // Visual (upstream behavior).
+    line.new(upper.loc, upper.value, n, upper.value, color = showBull ? bullCss : na)
+    label.new(int(math.avg(n, upper.loc)), upper.value, os == -1 ? 'ChoCH' : 'BOS',
+              color = color(na),
+              textcolor = showBull ? bullCss : na,
+              style = label.style_label_down,
+              size = size.tiny)
+
+    // Deepest pullback between the fractal bar and the break bar = SL (dashed line).
+    k = 2
+    float minv = low[1]
+    for i = 2 to (n - upper.loc) - 1
+        minv := math.min(low[i], minv)
+        k := low[i] == minv ? i : k
+
+    line sl_line = na
+    if showSL
+        sl_line := line.new(n - k, minv, n, minv, color = bullCss, style = line.style_dashed)
+
+    Zone z = Zone.new(
+              id = str.tostring(n),
+              direction = "long",
+              entry = upper.value,
+              sl = minv,
+              sl_line = sl_line,
+              mitigated = false)
+    array.push(bull_zones, z)
+    emit("new_zone", z)
+
+    upper.iscrossed := true
+    os := 1
+
+// ─── Bearish event (ChoCh down / BoS down) ───────────────────────────────────
+if ta.crossunder(close, lower.value) and not lower.iscrossed
+    line.new(lower.loc, lower.value, n, lower.value, color = showBear ? bearCss : na)
+    label.new(int(math.avg(n, lower.loc)), lower.value, os == 1 ? 'ChoCH' : 'BOS',
+              color = color(na),
+              textcolor = showBear ? bearCss : na,
+              style = label.style_label_up,
+              size = size.tiny)
+
+    k = 2
+    float maxv = high[1]
+    for i = 2 to (n - lower.loc) - 1
+        maxv := math.max(high[i], maxv)
+        k := high[i] == maxv ? i : k
+
+    line sl_line = na
+    if showSL
+        sl_line := line.new(n - k, maxv, n, maxv, color = bearCss, style = line.style_dashed)
+
+    Zone z = Zone.new(
+              id = str.tostring(n),
+              direction = "short",
+              entry = lower.value,
+              sl = maxv,
+              sl_line = sl_line,
+              mitigated = false)
+    array.push(bear_zones, z)
+    emit("new_zone", z)
+
+    lower.iscrossed := true
+    os := -1
+
+// ─── Mitigation tracking (on each bar close) ─────────────────────────────────
+if barstate.isconfirmed
+    if array.size(bull_zones) > 0
+        for i = 0 to array.size(bull_zones) - 1
+            z = array.get(bull_zones, i)
+            if not z.mitigated
+                if showSL and not na(z.sl_line)
+                    z.sl_line.set_x2(n)
+                if close < z.sl
+                    z.mitigated := true
+                    array.set(bull_zones, i, z)
+                    emit("mitigated", z)
+
+    if array.size(bear_zones) > 0
+        for i = 0 to array.size(bear_zones) - 1
+            z = array.get(bear_zones, i)
+            if not z.mitigated
+                if showSL and not na(z.sl_line)
+                    z.sl_line.set_x2(n)
+                if close > z.sl
+                    z.mitigated := true
+                    array.set(bear_zones, i, z)
+                    emit("mitigated", z)
