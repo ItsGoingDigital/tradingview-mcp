@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     chart_timeframe: str = "240"
     zone_within_points: int = 400  # MNQ: 400 pts ≈ 2% band
 
+    # Silver Bullet bot
+    sb_enabled: bool = True
+    sb_window_start_hhmm: str = "10:00"   # ET, inclusive
+    sb_window_end_hhmm: str = "11:15"      # ET, exclusive (cancels any unfilled stop)
+    sb_expiry_tick_sec: int = 30           # how often the expiry sweeper runs
+
     @field_validator("tradovate_cid", "tradovate_account_id", mode="before")
     @classmethod
     def _empty_to_zero(cls, v):

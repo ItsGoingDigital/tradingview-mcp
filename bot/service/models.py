@@ -19,6 +19,8 @@ class Zone(Base):
     __tablename__ = "zones"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Tags which bot owns this row. "mnq_sd" = 4H S&D zone bot. "silverbullet" = SB bot.
+    source: Mapped[str] = mapped_column(String, default="mnq_sd", index=True)
     symbol: Mapped[str] = mapped_column(String)
     tf: Mapped[str] = mapped_column(String)
     direction: Mapped[str] = mapped_column(String)  # long | short

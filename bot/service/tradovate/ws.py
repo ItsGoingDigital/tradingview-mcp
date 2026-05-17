@@ -117,8 +117,11 @@ def _on_fill_event(d: dict) -> None:
             )
             if entry_fill and price is not None and qty is not None:
                 # Long: pnl = (close - entry) * qty * pt_val. Short: inverse.
+                # Point value depends on which bot owns the row — both currently MNQ
+                # but parameterized so future symbols can override.
                 direction_mult = 1 if zone.direction == "long" else -1
-                pnl = (price - entry_fill.price) * qty * settings.mnq_point_value * direction_mult
+                pt_val = _point_value_for(zone.source)
+                pnl = (price - entry_fill.price) * qty * pt_val * direction_mult
             zone.status = "closed" if zone.status != "mitigated_after_fill" else "closed"
         s.add(
             Fill(
@@ -134,3 +137,9 @@ def _on_fill_event(d: dict) -> None:
 
 # Lazy settings import to avoid circular at module load
 from ..config import settings  # noqa: E402
+
+
+def _point_value_for(source: str) -> float:
+    """Both bots currently trade MNQ ($2/pt). Switch on `source` when adding others."""
+    # source ∈ {"mnq_sd", "silverbullet"} — both MNQ for now.
+    return settings.mnq_point_value

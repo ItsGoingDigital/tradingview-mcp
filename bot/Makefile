@@ -20,7 +20,7 @@ fmt:
 db-reset:
 	rm -f bot.db && $(PYTHON) -c "from service.db import init; init()"
 
-# Diff the upstream LuxAlgo source we pinned against a fresh copy.
+# Diff the upstream LuxAlgo MS Fractal source we pinned against a fresh copy.
 # Workflow: paste the latest LuxAlgo source into /tmp/lux_latest.pine, then:
 #   make pine-diff
 # If diff is non-empty, port the relevant changes into lux_market_structure_alerter.pine
@@ -28,3 +28,9 @@ db-reset:
 pine-diff:
 	@test -f /tmp/lux_latest.pine || (echo "Paste latest LuxAlgo source into /tmp/lux_latest.pine first" && exit 1)
 	@diff -u pine/_luxalgo_upstream.pine /tmp/lux_latest.pine || true
+
+# Same workflow for the Silver Bullet upstream pin.
+# Paste latest LuxAlgo "ICT Silver Bullet" source into /tmp/lux_sb_latest.pine first.
+pine-diff-sb:
+	@test -f /tmp/lux_sb_latest.pine || (echo "Paste latest LuxAlgo SB source into /tmp/lux_sb_latest.pine first" && exit 1)
+	@diff -u pine/_luxalgo_sb_upstream.pine /tmp/lux_sb_latest.pine || true

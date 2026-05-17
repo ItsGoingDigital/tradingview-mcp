@@ -1,0 +1,231 @@
+// Derived from "ICT Silver Bullet [LuxAlgo]" — CC BY-NC-SA 4.0
+// © LuxAlgo (original) — https://creativecommons.org/licenses/by-nc-sa/4.0/
+//
+// Modifications by repo author for personal-use automation:
+//   1. Stripped visual chrome (targets, dashboard, swing history).
+//   2. Hardcoded Super-Strict FVG mode + iTrend direction filter.
+//   3. Hardcoded AM-session window 10:00–11:15 ET (extended +15min from upstream).
+//   4. Dropped LN (3am) and PM (2pm) sessions.
+//   5. Sequential trigger: Super-Strict FVG must form on an earlier bar than MSS event.
+//   6. Alert emission on `new_signal` (sequential trigger fires) and `cancel`
+//      (the FVG used as SL was killed before our trade filled).
+//   7. Webhook shared secret input.
+//
+// This derivative is licensed under CC BY-NC-SA 4.0. Private use only;
+// do not redistribute without honoring the ShareAlike clause.
+//
+// Stays on Pine v5 to match upstream and avoid v6's stricter type inference
+// quirks observed in lux_market_structure_alerter.pine.
+
+//@version=5
+indicator("Lux SB Alerter", "Lux SB Alerter",
+  overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+left   = input.int(5, "Swing left", minval=1, maxval=20)
+secret = input.string("", "Webhook shared secret", confirm=true)
+showFVG    = input.bool(true, "Draw FVG boxes")
+showSBband = input.bool(true, "Tint SB window")
+cBullFVG   = color.new(#4dd0e1, 70)
+cBearFVG   = color.new(#ffc1b1, 70)
+cSBband    = color.new(#b2b5be, 80)
+
+n = bar_index
+minT = syminfo.mintick
+
+// ─── UDTs ────────────────────────────────────────────────────────────────────
+type FVG
+    box   bx
+    int   created_bar
+    float top
+    float bot
+    bool  active        // retraced into (proximal touched)
+    bool  current       // still tracked for super-strict invalidation
+    bool  killed        // close went past super-strict boundary
+
+// ─── State ───────────────────────────────────────────────────────────────────
+var array<FVG> bull_fvgs = array.new<FVG>()
+var array<FVG> bear_fvgs = array.new<FVG>()
+var int        trend     = 0
+var array<int> zz_dir    = array.new<int>(20, 0)
+var array<float> zz_y    = array.new<float>(20, na)
+var int        signal_bar = na      // bar_index of last emitted signal (for dedup)
+var int        last_sig_id = na     // bar_index used as id of last signal
+
+// ─── Session: 10:00–11:15 ET, weekdays ───────────────────────────────────────
+// Extended +15min from LuxAlgo's hardcoded 10:00–11:00 AM window.
+sb_t = time(timeframe.period, "1000-1115", "America/New_York")
+in_sb     = not na(sb_t)
+sb_start  = in_sb and na(sb_t[1])
+sb_end    = na(sb_t) and not na(sb_t[1])
+
+// Tint background during the window for visual sanity.
+bgcolor(showSBband and in_sb ? cSBband : na)
+
+// ─── Fractal pivots + MSS direction (mirrors upstream f_setTrend / aZZ) ──────
+ph = ta.pivothigh(left, 1)
+pl = ta.pivotlow (left, 1)
+
+// Maintain a rolling history of fractal pivots and their direction (1=high, -1=low).
+update_zz(int dir, float price) =>
+    zz_dir.unshift(dir), zz_dir.pop()
+    zz_y.unshift(price),  zz_y.pop()
+
+if not na(ph)
+    update_zz(1, nz(high[1]))
+if not na(pl)
+    update_zz(-1, nz(low[1]))
+
+// MSS trigger: close breaks a same-direction pivot from index 1 or 2.
+// (Identical logic to upstream f_setTrend.)
+mss_bull = false
+mss_bear = false
+if barstate.isconfirmed
+    iH = zz_dir.get(2) ==  1 ? 2 : 1
+    iL = zz_dir.get(2) == -1 ? 2 : 1
+    if not na(zz_y.get(iH)) and close > zz_y.get(iH) and zz_dir.get(iH) ==  1 and trend <  1
+        trend := 1
+        mss_bull := true
+    else if not na(zz_y.get(iL)) and close < zz_y.get(iL) and zz_dir.get(iL) == -1 and trend > -1
+        trend := -1
+        mss_bear := true
+
+// ─── FVG creation during SB window ───────────────────────────────────────────
+// Direction-filtered (iTrend): only bullish FVG when trend>=0, bearish when trend<=0.
+if in_sb
+    // Bullish FVG: low > high[2], gap-up
+    if low > high[2] and trend >= 0
+        b = box.new(n-2, low, n, high[2],
+              border_color=color(na),
+              bgcolor=showFVG ? cBullFVG : color.new(color.blue, 100))
+        f = FVG.new(
+              bx=b, created_bar=n, top=low, bot=high[2],
+              active=false, current=true, killed=false)
+        array.unshift(bull_fvgs, f)
+    // Bearish FVG: high < low[2], gap-down
+    if high < low[2] and trend <= 0
+        b = box.new(n-2, low[2], n, high,
+              border_color=color(na),
+              bgcolor=showFVG ? cBearFVG : color.new(color.blue, 100))
+        f = FVG.new(
+              bx=b, created_bar=n, top=low[2], bot=high,
+              active=false, current=true, killed=false)
+        array.unshift(bear_fvgs, f)
+
+// ─── Alert emission ──────────────────────────────────────────────────────────
+emit_signal(string evt, string id_str, string dir, float entry, float sl) =>
+    payload = '{"symbol":"' + syminfo.tickerid + '"' +
+              ',"tf":"' + timeframe.period + '"' +
+              ',"event":"' + evt + '"' +
+              ',"id":"' + id_str + '"' +
+              ',"direction":"' + dir + '"' +
+              ',"entry":' + str.tostring(entry, format.mintick) +
+              ',"sl":' + str.tostring(sl, format.mintick) +
+              ',"ts":' + str.tostring(time) +
+              ',"secret":"' + secret + '"}'
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─── Super-strict FVG state management ───────────────────────────────────────
+// Mirrors upstream's super-strict logic:
+//   - if close past the box's far edge while still current → mark killed (no trade)
+//   - if price retraces into the box → mark active (eligible as SL anchor)
+if in_sb
+    if bull_fvgs.size() > 0
+        for i = 0 to bull_fvgs.size() - 1
+            f = bull_fvgs.get(i)
+            if f.current and not f.killed
+                if close < f.bot
+                    // close below FVG bottom = super-strict invalidation
+                    f.current := false
+                    f.killed  := true
+                    f.bx.set_bgcolor(color.new(color.blue, 100))
+                    f.bx.set_right(f.created_bar)
+                    bull_fvgs.set(i, f)
+                    // If this FVG was the SL anchor of an in-flight signal, emit cancel.
+                    if not na(last_sig_id) and trend == 1
+                        emit_signal("cancel", str.tostring(last_sig_id), "long", na, na)
+                        last_sig_id := na
+                else
+                    // retrace check — first touch into the gap
+                    if not f.active and low < f.top and close > f.bot
+                        f.active := true
+                        bull_fvgs.set(i, f)
+                    if f.active
+                        f.bx.set_right(n)
+                        bull_fvgs.set(i, f)
+    if bear_fvgs.size() > 0
+        for i = 0 to bear_fvgs.size() - 1
+            f = bear_fvgs.get(i)
+            if f.current and not f.killed
+                if close > f.top
+                    f.current := false
+                    f.killed  := true
+                    f.bx.set_bgcolor(color.new(color.blue, 100))
+                    f.bx.set_right(f.created_bar)
+                    bear_fvgs.set(i, f)
+                    if not na(last_sig_id) and trend == -1
+                        emit_signal("cancel", str.tostring(last_sig_id), "short", na, na)
+                        last_sig_id := na
+                else
+                    if not f.active and high > f.bot and close < f.top
+                        f.active := true
+                        bear_fvgs.set(i, f)
+                    if f.active
+                        f.bx.set_right(n)
+                        bear_fvgs.set(i, f)
+
+// ─── Sequential trigger: MSS fires AFTER same-direction Super-Strict FVG ─────
+// Find the nearest active FVG (by price proximity to entry).
+nearest_bull_sl() =>
+    float best_sl = na
+    float best_dist = na
+    int   best_idx = -1
+    float entry_long = high  // entry = high of current MSS candle
+    if bull_fvgs.size() > 0
+        for i = 0 to bull_fvgs.size() - 1
+            f = bull_fvgs.get(i)
+            // Require sequential: FVG must have been created STRICTLY before this bar.
+            if f.current and not f.killed and f.created_bar < n
+                d = math.abs(entry_long - f.top)
+                if na(best_dist) or d < best_dist
+                    best_dist := d
+                    best_sl   := f.bot
+                    best_idx  := i
+    [best_sl, best_idx]
+
+nearest_bear_sl() =>
+    float best_sl = na
+    float best_dist = na
+    int   best_idx = -1
+    float entry_short = low
+    if bear_fvgs.size() > 0
+        for i = 0 to bear_fvgs.size() - 1
+            f = bear_fvgs.get(i)
+            if f.current and not f.killed and f.created_bar < n
+                d = math.abs(entry_short - f.bot)
+                if na(best_dist) or d < best_dist
+                    best_dist := d
+                    best_sl   := f.top
+                    best_idx  := i
+    [best_sl, best_idx]
+
+// Fire alert at MSS confirmation bar's close IF a same-direction Super-Strict FVG
+// was created on an earlier bar.
+if in_sb and barstate.isconfirmed
+    if mss_bull
+        [sl, idx] = nearest_bull_sl()
+        if not na(sl)
+            entry = high
+            last_sig_id := n
+            emit_signal("new_signal", str.tostring(n), "long", entry, sl)
+            // Visual marker
+            label.new(n, high, "▲ SB-LONG", style=label.style_label_down,
+                      color=color.new(color.green, 0), textcolor=color.white, size=size.small)
+    if mss_bear
+        [sl, idx] = nearest_bear_sl()
+        if not na(sl)
+            entry = low
+            last_sig_id := n
+            emit_signal("new_signal", str.tostring(n), "short", entry, sl)
+            label.new(n, low, "▼ SB-SHORT", style=label.style_label_up,
+                      color=color.new(color.red, 0), textcolor=color.white, size=size.small)
